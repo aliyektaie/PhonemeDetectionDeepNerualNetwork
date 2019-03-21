@@ -1,10 +1,7 @@
 import argparse
-import sys
 import os
-import progressbar
 import Constants
 from DataSet import DataSet
-from DataSet import TrainingEntry
 import FeatureExtractor
 
 
@@ -29,12 +26,12 @@ def extract_features(methods):
     dataset = DataSet(Constants.TRAINING_FOLDER_PATH)
 
     for method in methods:
+        feature_shapes = []
         print('Extracting Features: ' + method)
 
-        bar = progressbar.ProgressBar(maxval=len(dataset.entries), fd=sys.stdout,
-                                      widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
-        bar.start()
         current = 0
+        count = len(dataset.entries)
+
         for entry in dataset.entries:
             index = 0
             for audioFile in entry.get_audio_paths():
@@ -44,16 +41,25 @@ def extract_features(methods):
                 outputFile = outputFile + entry.word[0: min(len(entry.word), 2)] + Constants.SLASH
 
                 create_folder_if_not_exists(outputFile)
-                outputFile = outputFile + entry.word + '_' + str(index) + ".feature"
+                outputFile = outputFile + entry.word + '_' + str(index)
 
-                FeatureExtractor.extract_features(method, inputFile, outputFile)
+                FeatureExtractor.extract_features(method, inputFile, outputFile, feature_shapes)
                 index += 1
 
-            bar.update(current)
             current += 1
+            if current % 50 == 0:
+                p = current * 100.0 / count
+                p = str(round(p, 2))
+                print(f'{current} of {count} (%{p})')
 
-        bar.finish()
+        max_shape = [0, 0]
+        for shape in feature_shapes:
+            column = shape[1]
+            max_shape[1] = max(max_shape[1], column)
+            column = shape[0]
+            max_shape[0] = max(max_shape[0], column)
 
+        print(f'Max Shape ({method}): ({max_shape[0]}, {max_shape[1]})')
 
 def main():
     args = init_arguments()
