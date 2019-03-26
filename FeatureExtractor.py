@@ -4,15 +4,19 @@ import librosa.display
 import numpy
 import matplotlib.pyplot as plt
 from scipy.signal import butter, lfilter
+import os
 
 
 def extract_features(method, input_file, output_file, feature_shapes):
+    values = None
     if method == 'mfcc':
-        extract_mfcc_features(input_file, output_file, feature_shapes)
+        values = extract_mfcc_features(input_file, output_file, feature_shapes)
     elif method == 'mfcc+bandpass':
-        extract_mfcc_bandpass_features(input_file, output_file, feature_shapes)
+        values = extract_mfcc_bandpass_features(input_file, output_file, feature_shapes)
     else:
         raise ValueError('Invalid method type')
+
+    return values
 
 
 def apply_audio_filter(signal):
@@ -75,8 +79,13 @@ def extract_mfcc_bandpass_features(input_file, output_file, feature_shapes):
         plt.savefig(output_file + '.png')
         plt.close()
 
+    return flatten_features(mfccs)
+
 
 def extract_mfcc_features(input_file, output_file, feature_shapes):
+    if not os.path.isfile(input_file):
+        return []
+
     audio, _ = librosa.core.load(input_file, mono=True, sr=None)
     mfccs = librosa.feature.mfcc(y=audio,
                                  sr=Constants.AUDIO_FILES_SAMPLING_RATE,
@@ -96,6 +105,15 @@ def extract_mfcc_features(input_file, output_file, feature_shapes):
         plt.savefig(output_file + '.png')
         plt.close()
 
+    return flatten_features(mfccs)
+
+
+def flatten_features(mfccs):
+    values = []
+    for i in range(0, mfccs.shape[0]):
+        for j in range(mfccs.shape[1]):
+            values.append(mfccs[i, j])
+    return values
 
 # if __name__ == '__main__':
 #     for i in range(0, 10):
