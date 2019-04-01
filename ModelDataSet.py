@@ -1,28 +1,30 @@
 import numpy as np
+import Constants
 import keras
 
-# Base code is comming from:
+
+# Base code is coming from:
 #    https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
 # Changes made to adapt to the current project.
 
-class DataGenerator(keras.utils.Sequence):
-    'Generates data for Keras'
-
-    def __init__(self, list_IDs, labels, batch_size=32, dim=(32, 32, 32), n_channels=1,
+class ModelDataSet(keras.utils.Sequence):
+    def __init__(self, data_path, samples_id_list, labels, dim, batch_size=32, n_channels=1,
                  n_classes=10, shuffle=True):
         'Initialization'
+        self.data_path = data_path
         self.dim = dim
         self.batch_size = batch_size
         self.labels = labels
-        self.list_IDs = list_IDs
+        self.samples_id_list = samples_id_list
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.shuffle = shuffle
+        self.indexes = None
         self.on_epoch_end()
 
     def __len__(self):
         'Denotes the number of batches per epoch'
-        return int(np.floor(len(self.list_IDs) / self.batch_size))
+        return int(np.floor(len(self.samples_id_list) / self.batch_size))
 
     def __getitem__(self, index):
         'Generate one batch of data'
@@ -30,7 +32,7 @@ class DataGenerator(keras.utils.Sequence):
         indexes = self.indexes[index * self.batch_size:(index + 1) * self.batch_size]
 
         # Find list of IDs
-        list_IDs_temp = [self.list_IDs[k] for k in indexes]
+        list_IDs_temp = [self.samples_id_list[k] for k in indexes]
 
         # Generate data
         X, y = self.__data_generation(list_IDs_temp)
@@ -39,8 +41,8 @@ class DataGenerator(keras.utils.Sequence):
 
     def on_epoch_end(self):
         'Updates indexes after each epoch'
-        self.indexes = np.arange(len(self.list_IDs))
-        if self.shuffle == True:
+        self.indexes = np.arange(len(self.samples_id_list))
+        if self.shuffle:
             np.random.shuffle(self.indexes)
 
     def __data_generation(self, list_IDs_temp):
@@ -52,9 +54,13 @@ class DataGenerator(keras.utils.Sequence):
         # Generate data
         for i, ID in enumerate(list_IDs_temp):
             # Store sample
-            X[i,] = np.load('data/' + ID + '.npy')
+            path = self.get_data_folder(ID) + ID + '.npy'
+            X[i,] = np.load(path)
 
             # Store class
             y[i] = self.labels[ID]
 
         return X, keras.utils.to_categorical(y, num_classes=self.n_classes)
+
+    def get_data_folder(self, id):
+        return self.data_path + id[0, min(2, len(id))] + Constants.SLASH

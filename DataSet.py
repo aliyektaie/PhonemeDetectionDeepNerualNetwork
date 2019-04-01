@@ -1,4 +1,5 @@
 import Constants
+from random import shuffle
 
 
 class TrainingEntry:
@@ -17,6 +18,24 @@ class TrainingEntry:
 
         for i in range(0, self.audioCount):
             result.append(path + self.word + '_' + str(i) + '.wav')
+
+        return result
+
+    def get_phonetics_char_array(self):
+        result = []
+        prefix = ''
+
+        phonetics = self.phonetics
+
+        for ch in phonetics:
+            if ch == 'ˌ':
+                prefix = 'ˌ'
+            elif ch == 'ː':
+                result[len(result) - 1] += 'ː'
+                prefix = ''
+            else:
+                result.append(prefix + ch)
+                prefix = ''
 
         return result
 
@@ -45,8 +64,86 @@ class DataSet:
         parts = line.strip().split('\t')
 
         result.word = parts[0]
-        result.phonetics = parts[1]
+        result.phonetics = self.prepare_phonetics(parts[1])
         result.audioCount = int(parts[2])
+
+        if ',' in result.phonetics:
+            return None
 
         return result
 
+    @classmethod
+    def sample_from_data_set(cls, path, min_count_of_each_phoneme, max_count_of_each_phoneme):
+        symbols_to_word_mapper = {}
+        dataset = DataSet(path)
+        entries = []
+
+        indexPath = path + 'index.txt'
+        alphabet = []
+        with open(indexPath) as fileHandle:
+            line = fileHandle.readline()
+            while line:
+                entry = dataset.loadEntryFromIndexFileLine(line)
+                if entry is not None:
+                    entries.append(entry)
+                    symbols = set(entry.get_phonetics_char_array())
+                    for symbol in symbols:
+                        if symbol not in alphabet:
+                            alphabet.append(symbol)
+                            symbols_to_word_mapper[symbol] = []
+
+                        symbols_to_word_mapper[symbol].append(entry)
+
+                line = fileHandle.readline()
+
+        dataset, alphabet = cls.keep_samples_to_meet_min_count(dataset, alphabet, min_count_of_each_phoneme,
+                                                               max_count_of_each_phoneme, symbols_to_word_mapper)
+        return dataset, alphabet
+
+    @classmethod
+    def prepare_phonetics(cls, phonetics):
+        phonetics = phonetics.replace('ˈ', '')
+        phonetics = phonetics.replace('¦', '')
+        # phonetics = phonetics.replace('ː', '')
+
+        return phonetics
+
+    @classmethod
+    def keep_samples_to_meet_min_count(cls, dataset, alphabet, min_count_of_each_phoneme, max_count_of_each_phoneme,
+                                       symbols_to_word_mapper):
+
+        phonemes_count = [(symbol, len(symbols_to_word_mapper[symbol])) for symbol in alphabet]
+        sample_count = {symbol: 0 for symbol in alphabet}
+        phonemes_count.sort(key=lambda tup: tup[1])
+        new_alphabet = []
+
+        entries = []
+        for symbol, count in phonemes_count:
+            if count > min_count_of_each_phoneme:
+                entries_with_symbol = symbols_to_word_mapper[symbol]
+                shuffle(entries_with_symbol)
+
+                for entry in entries_with_symbol:
+                    symbols = set(entry.get_phonetics_char_array())
+
+                    should_add = True
+                    for s in symbols:
+                        should_add = should_add and sample_count[s] < max_count_of_each_phoneme
+                        should_add = should_add and len(symbols_to_word_mapper[s]) > min_count_of_each_phoneme
+
+                    if should_add:
+                        entries.append(entry)
+
+                        for s in symbols:
+                            sample_count[s] += 1
+
+                            if s not in new_alphabet:
+                                new_alphabet.append(s)
+
+        reduced_dataset = DataSet(dataset.path)
+        reduced_dataset.entries = entries
+
+        for entry in entries:
+            entry.dataSet = reduced_dataset
+
+        return reduced_dataset, new_alphabet
