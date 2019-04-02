@@ -2,6 +2,24 @@ import Constants
 from random import shuffle
 import os
 
+
+def static_get_phonetics_char_array(phonetics):
+    result = []
+    prefix = ''
+
+    for ch in phonetics:
+        if ch == 'ˌ':
+            prefix = 'ˌ'
+        elif ch == 'ː':
+            result[len(result) - 1] += 'ː'
+            prefix = ''
+        else:
+            result.append(prefix + ch)
+            prefix = ''
+
+    return result
+
+
 class TrainingEntry:
     def __init__(self, dataset):
         self.word = ''
@@ -29,22 +47,7 @@ class TrainingEntry:
         return result
 
     def get_phonetics_char_array(self):
-        result = []
-        prefix = ''
-
-        phonetics = self.phonetics
-
-        for ch in phonetics:
-            if ch == 'ˌ':
-                prefix = 'ˌ'
-            elif ch == 'ː':
-                result[len(result) - 1] += 'ː'
-                prefix = ''
-            else:
-                result.append(prefix + ch)
-                prefix = ''
-
-        return result
+        return static_get_phonetics_char_array(self.phonetics)
 
 
 class DataSet:
