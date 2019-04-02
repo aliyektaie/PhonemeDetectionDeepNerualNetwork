@@ -8,8 +8,8 @@ import keras
 # Changes made to adapt to the current project.
 
 class ModelDataSet(keras.utils.Sequence):
-    def __init__(self, data_path, samples_id_list, labels, dim, batch_size=32, n_channels=1,
-                 n_classes=10, shuffle=True):
+    def __init__(self, data_path, samples_id_list, labels, dim, n_classes, normalization_scale,
+                 batch_size=32, n_channels=1, shuffle=True):
         'Initialization'
         self.data_path = data_path
         self.dim = dim
@@ -20,6 +20,7 @@ class ModelDataSet(keras.utils.Sequence):
         self.n_classes = n_classes
         self.shuffle = shuffle
         self.indexes = None
+        self.normalization_scale = normalization_scale
         self.on_epoch_end()
 
     def __len__(self):

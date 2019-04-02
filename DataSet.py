@@ -1,6 +1,6 @@
 import Constants
 from random import shuffle
-
+import os
 
 class TrainingEntry:
     def __init__(self, dataset):
@@ -8,8 +8,12 @@ class TrainingEntry:
         self.phonetics = ''
         self.audioCount = 0
         self.dataSet = dataset
+        self.audioPaths = None
 
     def get_audio_paths(self):
+        if self.audioPaths is not None:
+            return self.audioPaths
+
         path = self.dataSet.path + Constants.AUDIO_FILES_FOLDER + Constants.SLASH
         folder = self.word[0: min(len(self.word), 2)]
         path = path + folder + Constants.SLASH
@@ -17,8 +21,11 @@ class TrainingEntry:
         result = []
 
         for i in range(0, self.audioCount):
-            result.append(path + self.word + '_' + str(i) + '.wav')
+            p = path + self.word + '_' + str(i) + '.wav'
+            if os.path.isfile(p):
+                result.append(p)
 
+        self.audioPaths = result
         return result
 
     def get_phonetics_char_array(self):
@@ -72,6 +79,27 @@ class DataSet:
 
         return result
 
+    def get_audio_file_size(self):
+        result = 0
+        for entry in self.entries:
+            for path in entry.get_audio_paths():
+                result += os.path.getsize(path)
+
+        return result
+
+    def get_entries_id_label_list(self):
+        phonetics = []
+        audio_id = []
+
+        for entry in self.entries:
+            i = 0
+            for path in entry.get_audio_paths():
+                phonetics.append(entry.phonetics)
+                audio_id.append(entry.word + '_' + str(i))
+                i += 1
+
+        return phonetics, audio_id
+
     @classmethod
     def sample_from_data_set(cls, path, min_count_of_each_phoneme, max_count_of_each_phoneme):
         symbols_to_word_mapper = {}
@@ -124,6 +152,9 @@ class DataSet:
                 shuffle(entries_with_symbol)
 
                 for entry in entries_with_symbol:
+                    if len(entry.get_audio_paths()) == 0:
+                        continue
+
                     symbols = set(entry.get_phonetics_char_array())
 
                     should_add = True

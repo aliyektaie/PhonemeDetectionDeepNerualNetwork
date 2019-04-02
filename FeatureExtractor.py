@@ -115,6 +115,49 @@ def flatten_features(mfccs):
             values.append(mfccs[i, j])
     return values
 
+
+def get_input_shape_and_normalizers_of_entry_list(feature_folder, ids):
+    x = 0
+    y = 0
+    stats = None
+
+    SUM = 0
+    SUM_OF_SQUARES = 1
+    N = 0
+
+    for id in ids:
+        word = id[0:id.index('_')]
+        path = feature_folder + word[0: min(2, len(word))] + Constants.SLASH + id + '.npy'
+
+        data = numpy.load(path)
+        _x, _y = data.shape
+
+        if x == 0:
+            x = _x
+            stats = numpy.zeros((x, 2), dtype=numpy.float64)
+        else:
+            x = max(_x, x)
+            assert x == _x
+
+        y = max(_y, y)
+
+        N += _y
+        for i in range(0, x):
+            for j in range(0, _y):
+                value = data[i, j]
+                stats[i, SUM] += value
+                stats[i, SUM_OF_SQUARES] += (value * value)
+
+    mean_variance = []
+    for i in range(0, x):
+        mean = stats[i, SUM] / N
+        variance = (stats[i, SUM_OF_SQUARES] / N) - (mean * mean)
+        std = numpy.sqrt(variance)
+
+        mean_variance.append((mean, std))
+
+    return (x, y), mean_variance
+
 # if __name__ == '__main__':
 #     for i in range(0, 10):
 #         input = f'/Users/yektaie/Desktop/untitled folder/test/tea_{i}.wav'
