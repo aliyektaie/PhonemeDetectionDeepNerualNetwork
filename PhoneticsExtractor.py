@@ -23,7 +23,7 @@ TRAINING_SET_ENTRIES_PATH = ''
 VALIDATION_SET_ENTRIES_PATH = ''
 MODEL_SAVE_LOCATION = ''
 MIN_SAMPLE_PHONEME_FREQUENCY = 100
-MAX_SAMPLE_PHONEME_FREQUENCY = 120
+MAX_SAMPLE_PHONEME_FREQUENCY = 10
 
 
 def create_rnn_dense_ctc_model(model, input_shape):
@@ -76,9 +76,6 @@ def load_model_dataset(dataset, alphabet):
     phonetics, audio_ids = dataset.get_entries_id_label_list()
     input_shape, mean_variance = FeatureExtractor.get_input_shape_and_normalizers_of_entry_list(FEATURES_FOLDER,
                                                                                                 audio_ids)
-    print('input shape')
-    print(input_shape)
-
     entries_list = [(p, a) for p, a in zip(phonetics, audio_ids)]
     shuffle(entries_list)
 

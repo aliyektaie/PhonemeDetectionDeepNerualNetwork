@@ -56,12 +56,20 @@ class ModelDataSet(keras.utils.Sequence):
         for i, ID in enumerate(list_IDs_temp):
             # Store sample
             path = self.get_data_folder(ID) + ID + '.npy'
-            X[i,] = np.load(path)
+            example = self.scale(np.load(path))
+            X[i, ] = example
 
             # Store class
             y[i] = self.labels[ID]
 
         return X, keras.utils.to_categorical(y, num_classes=self.n_classes)
+
+    def scale(self, array):
+        for i in range(len(self.normalization_scale)):
+            array[i, ] -= self.normalization_scale[i][Constants.TUPLE_INDEX_MEAN]
+            array[i, ] /= self.normalization_scale[i][Constants.TUPLE_INDEX_STD]
+
+        return array
 
     def get_data_folder(self, id):
         return self.data_path + id[0, min(2, len(id))] + Constants.SLASH
