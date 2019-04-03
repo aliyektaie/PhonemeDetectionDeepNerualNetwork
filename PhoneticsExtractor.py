@@ -81,13 +81,12 @@ def create_rnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_
     y_pred = Activation('softmax', name='softmax')(after_rnns)
 
     # adding the CTC part
-    labels = Input(name='the_labels', shape=[max_phonetics_length], dtype='float32')
+    labels = Input(name='phonetics', shape=[max_phonetics_length], dtype='float32')
     input_length = Input(name='input_length', shape=[1], dtype='int64')
     label_length = Input(name='label_length', shape=[1], dtype='int64')
     # Keras doesn't currently support loss funcs with extra parameters
     # so CTC loss is implemented in a lambda layer
-    # loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc')([y_pred, labels, input_length, label_length])
-    loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc')([y_pred])
+    loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc')([y_pred, labels, input_length, label_length])
 
     # clipnorm seems to speeds up convergence
     sgd = SGD(lr=0.02, decay=1e-6, momentum=0.9, nesterov=True, clipnorm=5)
@@ -121,11 +120,25 @@ def create_keras_model(model_name, input_shape, alphabet_size, max_phonetics_len
     return model
 
 
+def get_database_phonetics_alphabets(dataset):
+    result = set()
+
+    for entry in dataset.entries:
+        symbols = set(entry.get_phonetics_char_array())
+        for symbol in symbols:
+            if symbol not in result:
+                result.add(symbol)
+
+    return list(result)
+
+
 def load_dataset():
     print('Loading Data Set Information')
-    dataset, alphabet = DataSet.sample_from_data_set(Constants.TRAINING_FOLDER_PATH,
-                                                     MIN_SAMPLE_PHONEME_FREQUENCY,
-                                                     MAX_SAMPLE_PHONEME_FREQUENCY)
+    dataset, _ = DataSet.sample_from_data_set(Constants.TRAINING_FOLDER_PATH,
+                                              MIN_SAMPLE_PHONEME_FREQUENCY,
+                                              MAX_SAMPLE_PHONEME_FREQUENCY)
+
+    alphabet = get_database_phonetics_alphabets(dataset)
     size = round(dataset.get_audio_file_size() / (1024 * 1024 * 1024), 2)
     print(f'   -> Data Set: {len(dataset.entries)} entries, {size}GB')
     print('   -> Done')
@@ -204,7 +217,7 @@ def main():
     model = create_keras_model(MODEL_NAME, input_shape, len(alphabet), max_phonetics_length)
 
     history = model.fit_generator(generator=train_set,
-                                  epochs=1,
+                                  epochs=10,
                                   validation_data=validation_set,
                                   use_multiprocessing=True,
                                   workers=6)
