@@ -6,11 +6,15 @@ from DataSet import static_get_phonetics_char_array
 
 # Base code is coming from:
 #    https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly
+#
+# Also, changes were made inspired by:
+#    https://github.com/Tony607/keras-image-ocr/blob/master/image-ocr.ipynb
+#
 # Changes made to adapt to the current project.
 
 class ModelDataSet(keras.utils.Sequence):
     def __init__(self, data_path, samples_id_list, labels, labels_alphabet, max_phonetics_length, dim, n_classes,
-                 normalization_scale, batch_size=32, n_channels=1, shuffle=True):
+                 normalization_scale, batch_size=1, n_channels=1, shuffle=True):
         'Initialization'
         self.data_path = data_path
         self.dim = (dim[1], dim[0])
@@ -54,7 +58,7 @@ class ModelDataSet(keras.utils.Sequence):
             np.random.shuffle(self.indexes)
 
     def __data_generation(self, list_IDs_temp):
-        'Generates data containing batch_size samples'  # X : (n_samples, *dim, n_channels)
+        # 'Generates data containing batch_size samples'  # X : (n_samples, *dim, n_channels)
         # Initialization
         X = np.empty((self.batch_size, *self.dim))
         y = np.zeros([len(list_IDs_temp), self.max_phonetics_length])
@@ -81,7 +85,8 @@ class ModelDataSet(keras.utils.Sequence):
             'label_length': label_length,
         }
 
-        outputs = {'ctc': np.zeros([len(list_IDs_temp)])}  # dummy data for dummy loss function????
+        outputs = {'ctc_lambda': np.zeros([self.batch_size])}  # dummy data for dummy loss function????
+
         return inputs, outputs
 
     # def encode_phonetic_label(self, phonetic):
@@ -129,7 +134,7 @@ class ModelDataSet(keras.utils.Sequence):
 
 # Translation of characters to unique integer values
 def text_to_labels(phonetic, alphabet, max_length):
-    ret = np.ones(max_length) * len(alphabet)
+    ret = np.zeros(max_length)
     for i, char in enumerate(static_get_phonetics_char_array(phonetic)):
         ret[i] = alphabet.index(char)
     return ret

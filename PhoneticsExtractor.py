@@ -16,6 +16,7 @@ MODEL_NAME_CNN_DENSE_CTC = 'cnn_dense_ctc'
 MODEL_NAME_CNN_DENSE_RNN_DENSE_CTC = 'cnn_dense_rnn_dense_ctc'
 VALIDATION_PORTION = 0.15
 SHOULD_KEEP_DATA_SET_IN_MEMORY = True
+BATCH_SIZE = 32
 
 ''''
 Execution Parameters
@@ -37,7 +38,8 @@ def ctc_lambda_func(args):
     # the 2 is critical here since the first couple outputs of the RNN
     # tend to be garbage:
     y_pred = y_pred[:, 2:, :]
-    return K.ctc_batch_cost(labels, y_pred, input_length, label_length)
+    ret = K.ctc_batch_cost(labels, y_pred, input_length, label_length)
+    return ret
 
 
 def create_rnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length):
@@ -78,7 +80,7 @@ def create_rnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_
                        kernel_initializer='he_normal',
                        name='final_sense_layer')(concatenate([gru_2, gru_2b]))
 
-    y_pred = Activation('softmax', name='softmax')(after_rnns)
+    y_pred_layer = Activation('softmax', name='softmax')(after_rnns)
 
     # adding the CTC part
     labels = Input(name='phonetics', shape=[max_phonetics_length], dtype='float32')
@@ -86,15 +88,17 @@ def create_rnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_
     label_length = Input(name='label_length', shape=[1], dtype='int64')
     # Keras doesn't currently support loss funcs with extra parameters
     # so CTC loss is implemented in a lambda layer
-    loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc')([y_pred, labels, input_length, label_length])
+    loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc_lambda')([y_pred_layer, labels, input_length, label_length])
 
     # clipnorm seems to speeds up convergence
     sgd = SGD(lr=0.02, decay=1e-6, momentum=0.9, nesterov=True, clipnorm=5)
 
     model = Model(inputs=[input_data, labels, input_length, label_length], outputs=loss_out)
+    # model.summary()
 
     # the loss calc occurs elsewhere, so use a dummy lambda func for the loss
-    model.compile(loss={'ctc': lambda y_true, y_pred: y_pred}, optimizer=sgd)
+    model.compile(loss={'ctc_lambda': lambda y_true, y_pred: y_pred}, optimizer=sgd)
+    # model.compile(loss={'ctc_lambda': lambda y_true, y_pred: y_pred}, optimizer='adam')
 
     return model
 
@@ -129,7 +133,13 @@ def get_database_phonetics_alphabets(dataset):
             if symbol not in result:
                 result.add(symbol)
 
-    return list(result)
+    temp = list(result)
+    result = ['']
+    for t in temp:
+        result.append(t)
+
+    return result
+
 
 
 def load_dataset():
@@ -156,11 +166,11 @@ def get_tuple_array_dimension(list, i):
     return result
 
 
-def get_max_phonetics_length(phonetics):
+def get_max_phonetics_length(entries):
     result = 0
 
-    for p in phonetics:
-        result = max(len(p), result)
+    for entry in entries:
+        result = max(len(entry.get_phonetics_char_array()), result)
 
     return result
 
@@ -168,7 +178,7 @@ def get_max_phonetics_length(phonetics):
 def load_model_dataset(dataset, alphabet):
     print('Load Network Data Provider')
     phonetics, audio_ids = dataset.get_entries_id_label_list()
-    max_phonetics_length = get_max_phonetics_length(phonetics)
+    max_phonetics_length = get_max_phonetics_length(dataset.entries)
     print('   -> Loading normalization factors')
     input_shape, mean_variance = FeatureExtractor.get_input_shape_and_normalizers_of_entry_list(FEATURES_FOLDER,
                                                                                                 audio_ids)
@@ -187,7 +197,8 @@ def load_model_dataset(dataset, alphabet):
                                        max_phonetics_length,
                                        input_shape,
                                        len(alphabet),
-                                       mean_variance)
+                                       mean_variance,
+                                       batch_size=BATCH_SIZE)
 
     model_dataset_validation = ModelDataSet(FEATURES_FOLDER,
                                             get_tuple_array_dimension(validation_list, 1),
@@ -196,7 +207,8 @@ def load_model_dataset(dataset, alphabet):
                                             max_phonetics_length,
                                             input_shape,
                                             len(alphabet),
-                                            mean_variance)
+                                            mean_variance,
+                                            batch_size=BATCH_SIZE)
 
     model_dataset_train.cache_dataset = SHOULD_KEEP_DATA_SET_IN_MEMORY
     model_dataset_validation.cache_dataset = SHOULD_KEEP_DATA_SET_IN_MEMORY
@@ -216,12 +228,16 @@ def main():
 
     model = create_keras_model(MODEL_NAME, input_shape, len(alphabet), max_phonetics_length)
 
+    print('Start training')
     history = model.fit_generator(generator=train_set,
                                   epochs=10,
+
                                   validation_data=validation_set,
                                   use_multiprocessing=True,
-                                  workers=6)
+                                  workers=6,
+                                  verbose=2)
 
+    print('Training finished')
     # list all data in history
     print(history.history.keys())
     # summarize history for accuracy
