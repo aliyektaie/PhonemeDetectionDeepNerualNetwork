@@ -1,9 +1,12 @@
 from keras import *
 from keras.layers import *
+from keras.optimizers import SGD
+
 from DataSet import *
 from ModelDataSet import ModelDataSet
 from random import shuffle
 import FeatureExtractor
+import matplotlib.pyplot as plt
 
 '''
 Constants Section
@@ -27,7 +30,17 @@ MIN_SAMPLE_PHONEME_FREQUENCY = 100
 MAX_SAMPLE_PHONEME_FREQUENCY = 10
 
 
-def create_rnn_dense_ctc_model(model, input_shape, alphabet_size):
+# the actual loss calc occurs here despite it not being
+# an internal Keras loss function
+def ctc_lambda_func(args):
+    y_pred, labels, input_length, label_length = args
+    # the 2 is critical here since the first couple outputs of the RNN
+    # tend to be garbage:
+    y_pred = y_pred[:, 2:, :]
+    return K.ctc_batch_cost(labels, y_pred, input_length, label_length)
+
+
+def create_rnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length):
     # base code extracted from:
     #   https://github.com/Tony607/keras-image-ocr/blob/master/image-ocr.ipynb
     input_dense_nc = 32
@@ -67,27 +80,43 @@ def create_rnn_dense_ctc_model(model, input_shape, alphabet_size):
 
     y_pred = Activation('softmax', name='softmax')(after_rnns)
 
-    Model(input_data, y_pred).summary()
+    # adding the CTC part
+    labels = Input(name='the_labels', shape=[max_phonetics_length], dtype='float32')
+    input_length = Input(name='input_length', shape=[1], dtype='int64')
+    label_length = Input(name='label_length', shape=[1], dtype='int64')
+    # Keras doesn't currently support loss funcs with extra parameters
+    # so CTC loss is implemented in a lambda layer
+    # loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc')([y_pred, labels, input_length, label_length])
+    loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc')([y_pred])
+
+    # clipnorm seems to speeds up convergence
+    sgd = SGD(lr=0.02, decay=1e-6, momentum=0.9, nesterov=True, clipnorm=5)
+
+    model = Model(inputs=[input_data, labels, input_length, label_length], outputs=loss_out)
+
+    # the loss calc occurs elsewhere, so use a dummy lambda func for the loss
+    model.compile(loss={'ctc': lambda y_true, y_pred: y_pred}, optimizer=sgd)
+
     return model
 
 
-def create_cnn_dense_ctc_model(model, input_shape, alphabet_size):
+def create_cnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length):
     return model
 
 
-def create_cnn_dense_rnn_dense_ctc_model(model, input_shape, alphabet_size):
+def create_cnn_dense_rnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length):
     return model
 
 
-def create_keras_model(model_name, input_shape, alphabet_size):
+def create_keras_model(model_name, input_shape, alphabet_size, max_phonetics_length):
     model = Sequential()
 
     if model_name == MODEL_NAME_RNN_DENSE_CTC:
-        model = create_rnn_dense_ctc_model(model, input_shape, alphabet_size)
+        model = create_rnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length)
     elif model_name == MODEL_NAME_CNN_DENSE_RNN_DENSE_CTC:
-        model = create_cnn_dense_ctc_model(model, input_shape, alphabet_size)
+        model = create_cnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length)
     elif model_name == MODEL_NAME_CNN_DENSE_CTC:
-        model = create_cnn_dense_ctc_model(model, input_shape, alphabet_size)
+        model = create_cnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length)
 
     return model
 
@@ -164,14 +193,40 @@ def load_model_dataset(dataset, alphabet):
     print('   -> Done')
     print('')
 
-    return model_dataset_train, model_dataset_validation, input_shape, mean_variance
+    return model_dataset_train, model_dataset_validation, input_shape, mean_variance, max_phonetics_length
 
 
 def main():
     dataset, alphabet = load_dataset()
-    train_set, validation_set, input_shape, features_mean_variance = load_model_dataset(dataset, alphabet)
+    train_set, validation_set, input_shape, features_mean_variance, max_phonetics_length = load_model_dataset(dataset,
+                                                                                                              alphabet)
 
-    model = create_keras_model(MODEL_NAME, input_shape, len(alphabet))
+    model = create_keras_model(MODEL_NAME, input_shape, len(alphabet), max_phonetics_length)
+
+    history = model.fit_generator(generator=train_set,
+                                  epochs=1,
+                                  validation_data=validation_set,
+                                  use_multiprocessing=True,
+                                  workers=6)
+
+    # list all data in history
+    print(history.history.keys())
+    # summarize history for accuracy
+    plt.plot(history.history['acc'])
+    plt.plot(history.history['val_acc'])
+    plt.title('model accuracy')
+    plt.ylabel('accuracy')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'test'], loc='upper left')
+    plt.show()
+    # summarize history for loss
+    plt.plot(history.history['loss'])
+    plt.plot(history.history['val_loss'])
+    plt.title('model loss')
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'test'], loc='upper left')
+    plt.show()
 
 
 if __name__ == '__main__':
