@@ -34,6 +34,8 @@ class ModelDataSet(keras.utils.Sequence):
         self.cache_length = {}
         self.alphabet_index = {ch: i for i, ch in enumerate(labels_alphabet)}
         self.label_encoding_type = ''
+        self.label_prefix = None
+        self.label_postfix = None
 
     def __len__(self):
         'Denotes the number of batches per epoch'
@@ -62,7 +64,7 @@ class ModelDataSet(keras.utils.Sequence):
         # 'Generates data containing batch_size samples'  # X : (n_samples, *dim, n_channels)
         # Initialization
         X = np.empty((self.batch_size, *self.dim))
-        y = np.zeros([len(list_IDs_temp), self.max_phonetics_length])
+        y = self.init_label_output_matrix(list_IDs_temp)
         input_length = np.zeros([len(list_IDs_temp), 1])
         label_length = np.zeros([len(list_IDs_temp), 1])
 
@@ -75,21 +77,29 @@ class ModelDataSet(keras.utils.Sequence):
             # Store class
             phonetic = self.labels[ID]
             input_length[i] = input_len
-            label = text_to_labels(phonetic, self.labels_alphabet, self.max_phonetics_length)
+            label = self.text_to_labels(phonetic, self.labels_alphabet, self.max_phonetics_length)
             label_length[i] = len(static_get_phonetics_char_array(phonetic))
 
-            y[i, 0:len(label)] = label
+            y[i,] = label
 
         inputs = {
             'input_layer': X,
             'phonetics': y,
-            'input_length': input_length,
-            'label_length': label_length,
+            # 'input_length': input_length,
+            # 'label_length': label_length,
         }
 
         outputs = {'ctc_lambda': np.zeros([self.batch_size])}  # dummy data for dummy loss function????
 
         return inputs, outputs
+
+    def init_label_output_matrix(self, list_IDs_temp):
+        if self.label_encoding_type == 'sequential':
+            return np.zeros([len(list_IDs_temp), self.max_phonetics_length])
+        elif self.label_encoding_type == 'sparse_matrix':
+            return np.zeros([len(list_IDs_temp), self.max_phonetics_length, len(self.labels_alphabet)])
+        else:
+            raise ValueError()
 
     # def encode_phonetic_label(self, phonetic):
     #     result = np.zeros((self.max_phonetics_length, len(self.labels_alphabet)), dtype=float)
@@ -112,7 +122,7 @@ class ModelDataSet(keras.utils.Sequence):
 
         return example, length
 
-    def scale_and_pad_to_meet_dim(self, ID,  array):
+    def scale_and_pad_to_meet_dim(self, ID, array):
         for i in range(len(self.normalization_scale)):
             array[i,] -= self.normalization_scale[i][Constants.TUPLE_INDEX_MEAN]
             array[i,] /= self.normalization_scale[i][Constants.TUPLE_INDEX_STD]
@@ -134,21 +144,33 @@ class ModelDataSet(keras.utils.Sequence):
 
         return self.data_path + id[0:min(2, len(id))] + Constants.SLASH
 
+    # Translation of characters to unique integer values
+    def text_to_labels(self, phonetic, alphabet, max_length):
+        if self.label_prefix is not None:
+            phonetic = self.label_prefix + phonetic
 
-# Translation of characters to unique integer values
-def text_to_labels(phonetic, alphabet, max_length):
-    ret = np.ones(max_length) * -1
-    for i, char in enumerate(static_get_phonetics_char_array(phonetic)):
-        ret[i] = alphabet.index(char)
-    return ret
+        if self.label_postfix is not None:
+            phonetic = phonetic + self.label_postfix
 
-
-# Reverse translation of numerical classes back to characters
-def labels_to_text(labels, alphabet):
-    ret = []
-    for c in labels:
-        if c == len(alphabet):  # CTC Blank
-            ret.append("")
+        if self.label_encoding_type == 'sequential':
+            ret = np.ones(max_length) * -1
+            for i, char in enumerate(static_get_phonetics_char_array(phonetic)):
+                ret[i] = alphabet.index(char)
+            return ret
+        elif self.label_encoding_type == 'sparse_matrix':
+            ret = np.zeros((max_length, len(self.labels_alphabet)))
+            for i, char in enumerate(static_get_phonetics_char_array(phonetic)):
+                ret[i, alphabet.index(char)] = 1.0
+            return ret
         else:
-            ret.append(alphabet[c])
-    return "".join(ret)
+            raise ValueError
+
+    # Reverse translation of numerical classes back to characters
+    def labels_to_text(self, labels, alphabet):
+        ret = []
+        for c in labels:
+            if c == len(alphabet):  # CTC Blank
+                ret.append("")
+            else:
+                ret.append(alphabet[c])
+        return "".join(ret)

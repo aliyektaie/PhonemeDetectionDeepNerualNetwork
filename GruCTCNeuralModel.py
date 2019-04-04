@@ -67,7 +67,7 @@ class GruCTCNeuralModel(BaseNeuralModel):
         self.model = model
 
     def prepare_data_provider(self, provider):
-        provider.label_encoding_type = 'sequence'
+        provider.label_encoding_type = 'sequential'
 
     def train(self, train_set, validation_set):
         return self.model.fit_generator(generator=train_set,

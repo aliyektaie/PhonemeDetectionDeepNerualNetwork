@@ -16,15 +16,14 @@ class AutoEncoderNeuralModel(BaseNeuralModel):
         encoder_states = [state_h, state_c]
 
         # Set up the decoder, using `encoder_states` as initial state.
-        decoder_inputs = Input(shape=(None, alphabet_size))
+        decoder_inputs = Input(name='phonetics', shape=(None, alphabet_size))
         # We set up our decoder to return full output sequences,
         # and to return internal states as well. We don't use the
         # return states in the training model, but we will use them in inference.
         decoder_lstm = LSTM(latent_dim, return_sequences=True, return_state=True)
         decoder_outputs, _, _ = decoder_lstm(decoder_inputs,
                                              initial_state=encoder_states)
-        decoder_dense = Dense(alphabet_size, activation='softmax')
-        decoder_outputs = decoder_dense(decoder_outputs)
+        decoder_outputs = Dense(alphabet_size, activation='softmax', name='softmax')(decoder_outputs)
 
         # Define the model that will turn
         # `encoder_input_data` & `decoder_input_data` into `decoder_target_data`
@@ -37,6 +36,9 @@ class AutoEncoderNeuralModel(BaseNeuralModel):
 
     def prepare_data_provider(self, provider):
         provider.label_encoding_type = 'sparse_matrix'
+        # provider.label_prefix = '\t'
+        # provider.label_postfix = '\n'
+        # provider.max_phonetics_length += 2
 
     def train(self, train_set, validation_set):
         return self.model.fit_generator(generator=train_set,
