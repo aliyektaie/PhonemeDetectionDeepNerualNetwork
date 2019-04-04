@@ -1,5 +1,5 @@
 import Constants
-from random import shuffle
+import random
 import os
 
 
@@ -152,7 +152,7 @@ class DataSet:
         for symbol, count in phonemes_count:
             if count > min_count_of_each_phoneme:
                 entries_with_symbol = symbols_to_word_mapper[symbol]
-                shuffle(entries_with_symbol)
+                random.Random(0).shuffle(entries_with_symbol)
 
                 for entry in entries_with_symbol:
                     if len(entry.get_audio_paths()) == 0:

@@ -33,6 +33,7 @@ class ModelDataSet(keras.utils.Sequence):
         self.cache = {}
         self.cache_length = {}
         self.alphabet_index = {ch: i for i, ch in enumerate(labels_alphabet)}
+        self.label_encoding_type = ''
 
     def __len__(self):
         'Denotes the number of batches per epoch'
@@ -73,9 +74,10 @@ class ModelDataSet(keras.utils.Sequence):
 
             # Store class
             phonetic = self.labels[ID]
-            label_length[i] = len(phonetic)
             input_length[i] = input_len
             label = text_to_labels(phonetic, self.labels_alphabet, self.max_phonetics_length)
+            label_length[i] = len(static_get_phonetics_char_array(phonetic))
+
             y[i, 0:len(label)] = label
 
         inputs = {
@@ -102,7 +104,7 @@ class ModelDataSet(keras.utils.Sequence):
             return self.cache[ID], self.cache_length[ID]
 
         path = self.get_data_folder(ID) + ID + '.npy'
-        example, length = self.scale_and_pad_to_meet_dim(np.load(path))
+        example, length = self.scale_and_pad_to_meet_dim(ID, np.load(path))
 
         if self.cache_dataset:
             self.cache[ID] = example
@@ -110,12 +112,13 @@ class ModelDataSet(keras.utils.Sequence):
 
         return example, length
 
-    def scale_and_pad_to_meet_dim(self, array):
+    def scale_and_pad_to_meet_dim(self, ID,  array):
         for i in range(len(self.normalization_scale)):
             array[i,] -= self.normalization_scale[i][Constants.TUPLE_INDEX_MEAN]
             array[i,] /= self.normalization_scale[i][Constants.TUPLE_INDEX_STD]
 
         length = array.shape[1]
+        # print('--------------- ' + ID + ' -> '+str(length))
         array = array.T
         result = np.zeros(self.dim, dtype=np.float64)
 
@@ -134,7 +137,7 @@ class ModelDataSet(keras.utils.Sequence):
 
 # Translation of characters to unique integer values
 def text_to_labels(phonetic, alphabet, max_length):
-    ret = np.zeros(max_length)
+    ret = np.ones(max_length) * -1
     for i, char in enumerate(static_get_phonetics_char_array(phonetic)):
         ret[i] = alphabet.index(char)
     return ret

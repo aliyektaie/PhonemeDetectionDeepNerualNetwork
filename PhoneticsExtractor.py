@@ -1,8 +1,6 @@
-from keras import *
-from keras.layers import *
-from keras.optimizers import SGD
-
+from AutoEncoderNeuralModel import AutoEncoderNeuralModel
 from DataSet import *
+from GruCTCNeuralModel import GruCTCNeuralModel
 from ModelDataSet import ModelDataSet
 from random import shuffle
 import FeatureExtractor
@@ -12,8 +10,7 @@ import matplotlib.pyplot as plt
 Constants Section
 '''
 MODEL_NAME_RNN_DENSE_CTC = 'rnn_dense_ctc'
-MODEL_NAME_CNN_DENSE_CTC = 'cnn_dense_ctc'
-MODEL_NAME_CNN_DENSE_RNN_DENSE_CTC = 'cnn_dense_rnn_dense_ctc'
+MODEL_NAME_AUTO_ENCODERS = 'auto_encoder'
 VALIDATION_PORTION = 0.15
 SHOULD_KEEP_DATA_SET_IN_MEMORY = True
 BATCH_SIZE = 32
@@ -31,95 +28,15 @@ MIN_SAMPLE_PHONEME_FREQUENCY = 100
 MAX_SAMPLE_PHONEME_FREQUENCY = 10
 
 
-# the actual loss calc occurs here despite it not being
-# an internal Keras loss function
-def ctc_lambda_func(args):
-    y_pred, labels, input_length, label_length = args
-    # the 2 is critical here since the first couple outputs of the RNN
-    # tend to be garbage:
-    y_pred = y_pred[:, 2:, :]
-    ret = K.ctc_batch_cost(labels, y_pred, input_length, label_length)
-    return ret
-
-
-def create_rnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length):
-    # base code extracted from:
-    #   https://github.com/Tony607/keras-image-ocr/blob/master/image-ocr.ipynb
-    input_dense_nc = 32
-    rnn_nc = 256
-
-    input_data = Input(name='input_layer', shape=input_shape, dtype='float32')
-    after_input_layer = Dense(input_dense_nc, activation='relu', name='dense_after_input')(input_data)
-
-    # Two layers of bidirectional GRUs
-    gru_1 = GRU(rnn_nc,
-                return_sequences=True,
-                kernel_initializer='he_normal',
-                name='gru1')(after_input_layer)
-
-    gru_1b = GRU(rnn_nc, return_sequences=True,
-                 go_backwards=True,
-                 kernel_initializer='he_normal',
-                 name='gru1_b')(after_input_layer)
-
-    gru1_merged = add([gru_1, gru_1b])
-
-    gru_2 = GRU(rnn_nc,
-                return_sequences=True,
-                kernel_initializer='he_normal',
-                name='gru2')(gru1_merged)
-
-    gru_2b = GRU(rnn_nc,
-                 return_sequences=True,
-                 go_backwards=True,
-                 kernel_initializer='he_normal',
-                 name='gru2_b')(gru1_merged)
-
-    # transforms RNN output to character activations:
-    after_rnns = Dense(alphabet_size + 1,  # +1 for empty token
-                       kernel_initializer='he_normal',
-                       name='final_sense_layer')(concatenate([gru_2, gru_2b]))
-
-    y_pred_layer = Activation('softmax', name='softmax')(after_rnns)
-
-    # adding the CTC part
-    labels = Input(name='phonetics', shape=[max_phonetics_length], dtype='float32')
-    input_length = Input(name='input_length', shape=[1], dtype='int64')
-    label_length = Input(name='label_length', shape=[1], dtype='int64')
-    # Keras doesn't currently support loss funcs with extra parameters
-    # so CTC loss is implemented in a lambda layer
-    loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc_lambda')([y_pred_layer, labels, input_length, label_length])
-
-    # clipnorm seems to speeds up convergence
-    sgd = SGD(lr=0.02, decay=1e-6, momentum=0.9, nesterov=True, clipnorm=5)
-
-    model = Model(inputs=[input_data, labels, input_length, label_length], outputs=loss_out)
-    # model.summary()
-
-    # the loss calc occurs elsewhere, so use a dummy lambda func for the loss
-    model.compile(loss={'ctc_lambda': lambda y_true, y_pred: y_pred}, optimizer=sgd)
-    # model.compile(loss={'ctc_lambda': lambda y_true, y_pred: y_pred}, optimizer='adam')
-
-    return model
-
-
-def create_cnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length):
-    return model
-
-
-def create_cnn_dense_rnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length):
-    return model
-
-
 def create_keras_model(model_name, input_shape, alphabet_size, max_phonetics_length):
-    model = Sequential()
+    model = None
 
     if model_name == MODEL_NAME_RNN_DENSE_CTC:
-        model = create_rnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length)
-    elif model_name == MODEL_NAME_CNN_DENSE_RNN_DENSE_CTC:
-        model = create_cnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length)
-    elif model_name == MODEL_NAME_CNN_DENSE_CTC:
-        model = create_cnn_dense_ctc_model(model, input_shape, alphabet_size, max_phonetics_length)
+        model = GruCTCNeuralModel()
+    elif model_name == MODEL_NAME_AUTO_ENCODERS:
+        model = AutoEncoderNeuralModel()
+
+    model.init_model(input_shape, alphabet_size, max_phonetics_length)
 
     return model
 
@@ -134,12 +51,11 @@ def get_database_phonetics_alphabets(dataset):
                 result.add(symbol)
 
     temp = list(result)
-    result = ['']
+    result = [' ']
     for t in temp:
         result.append(t)
 
     return result
-
 
 
 def load_dataset():
@@ -212,7 +128,7 @@ def load_model_dataset(dataset, alphabet):
 
     model_dataset_train.cache_dataset = SHOULD_KEEP_DATA_SET_IN_MEMORY
     model_dataset_validation.cache_dataset = SHOULD_KEEP_DATA_SET_IN_MEMORY
-    input_shape = (None, input_shape[0])
+    input_shape = (input_shape[1], input_shape[0])
 
     print('   -> Network input shape: ' + str(input_shape))
     print('   -> Done')
@@ -227,15 +143,11 @@ def main():
                                                                                                               alphabet)
 
     model = create_keras_model(MODEL_NAME, input_shape, len(alphabet), max_phonetics_length)
+    model.prepare_data_provider(train_set)
+    model.prepare_data_provider(validation_set)
 
     print('Start training')
-    history = model.fit_generator(generator=train_set,
-                                  epochs=10,
-
-                                  validation_data=validation_set,
-                                  use_multiprocessing=True,
-                                  workers=6,
-                                  verbose=2)
+    history = model.train(train_set, validation_set)
 
     print('Training finished')
     # list all data in history
