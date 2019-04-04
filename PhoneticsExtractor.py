@@ -25,7 +25,7 @@ TRAINING_SET_ENTRIES_PATH = ''
 VALIDATION_SET_ENTRIES_PATH = ''
 MODEL_SAVE_LOCATION = ''
 MIN_SAMPLE_PHONEME_FREQUENCY = 100
-MAX_SAMPLE_PHONEME_FREQUENCY = 10
+MAX_SAMPLE_PHONEME_FREQUENCY = 100
 
 
 def create_keras_model(model_name, input_shape, alphabet_size, max_phonetics_length):
@@ -56,6 +56,17 @@ def get_database_phonetics_alphabets(dataset):
 
 def load_dataset():
     print('Loading Data Set Information')
+    # ds = DataSet(Constants.TRAINING_FOLDER_PATH)
+    #
+    # max_length = 0
+    # e = None
+    # for i, entry in enumerate(ds.entries):
+    #     last_max = max_length
+    #     max_length = max(max_length, len(entry.get_phonetics_char_array()))
+    #     if last_max != max_length:
+    #         e = entry
+    #
+    # print(max_length)
     dataset, _ = DataSet.sample_from_data_set(Constants.TRAINING_FOLDER_PATH,
                                               MIN_SAMPLE_PHONEME_FREQUENCY,
                                               MAX_SAMPLE_PHONEME_FREQUENCY)
@@ -139,11 +150,11 @@ def save_sample(dataset, alphabet):
     for entry in dataset.entries:
         index += f'{entry.word}\t{entry.phonetics}\t{entry.audioCount}\n'
 
-    file = open("/Volumes/Files/Georgetown/Advanced Machine Learning/Project Data/DataSet/index_sample.txt", "w")
+    file = open("/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/index_sample.txt", "w")
     file.write(index)
     file.close()
 
-    file = open("/Volumes/Files/Georgetown/Advanced Machine Learning/Project Data/DataSet/alphabet_sample.txt", "w")
+    file = open("/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/alphabet_sample.txt", "w")
     file.write(',,'.join(alphabet))
     file.close()
 

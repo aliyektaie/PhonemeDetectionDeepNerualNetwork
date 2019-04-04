@@ -60,11 +60,16 @@ class DataSet:
     def load(self):
         result = []
 
-        indexPath = self.path + 'index.txt'
+        indexPath = self.path
+        if not indexPath.endswith('.txt'):
+            indexPath = indexPath + 'index.txt'
+
         with open(indexPath) as fileHandle:
             line = fileHandle.readline()
             while line:
-                self.entries.append(self.loadEntryFromIndexFileLine(line))
+                e = self.loadEntryFromIndexFileLine(line)
+                if e is not None:
+                    self.entries.append(e)
                 line = fileHandle.readline()
 
         return result
