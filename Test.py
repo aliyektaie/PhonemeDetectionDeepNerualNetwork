@@ -2,7 +2,7 @@ import os
 import datetime
 import numpy as np
 from keras import backend as K
-from keras.layers import Input, Dense, Activation
+from keras.layers import Input, Dense, Activation, LSTM
 from keras.layers import Lambda
 from keras.layers.merge import add, concatenate
 from keras.models import Model
@@ -10,9 +10,14 @@ from keras.layers.recurrent import GRU
 from keras.optimizers import SGD
 import keras.callbacks
 import matplotlib.pyplot as plt
+from keras.backend.tensorflow_backend import ctc_label_dense_to_sparse
+from tensorflow.python.ops import ctc_ops as ctc
+from keras.backend.common import epsilon
 
 import Constants
+import FeatureExtractor
 from DataSet import DataSet
+import tensorflow as tf
 
 TRAIN_INDEX_FILE = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/index_sample.txt'
 FEATURE_PATH = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/Features/mfcc/'
@@ -106,6 +111,7 @@ class TextImageGenerator(keras.callbacks.Callback):
         self.Y_len = None
         self.cur_val_index = 0
         self.cur_train_index = 0
+        self.mean_variance = None
 
     def get_output_size(self):
         return len(alphabet) + 1
@@ -122,7 +128,9 @@ class TextImageGenerator(keras.callbacks.Callback):
         self.Y_len = [0] * self.num_example
 
         ds = DataSet(self.dataset_index_file)
+
         num_sample_loaded = 0
+        audio_ids = []
         for i, entry in enumerate(ds.entries):
             if i == self.num_example or num_sample_loaded >= self.num_example:
                 break
@@ -135,12 +143,17 @@ class TextImageGenerator(keras.callbacks.Callback):
                 sample.word = entry.word
                 sample.phonetics = entry.get_phonetics_char_array()
                 folder = FEATURE_PATH + sample.word[0: min(2, len(sample.word))] + Constants.SLASH
-                sample.data_path = folder + sample.word + '_' + str(j) + '.npy'
+                _id = sample.word + '_' + str(j)
+                audio_ids.append(_id)
+                sample.data_path = folder + _id + '.npy'
                 self.entries_list[num_sample_loaded] = sample
                 num_sample_loaded += 1
 
         if num_sample_loaded != self.num_example:
             raise IOError('Could not pull enough sample from the dataset. ')
+
+        _, self.mean_variance = FeatureExtractor.get_input_shape_and_normalizers_of_entry_list(FEATURE_PATH,
+                                                                                               audio_ids)
 
         for i, entry in enumerate(self.entries_list):
             phonetics_length = len(entry.phonetics)
@@ -159,7 +172,7 @@ class TextImageGenerator(keras.callbacks.Callback):
         input_length = np.zeros([size, 1])
         label_length = np.zeros([size, 1])
         for i in range(size):
-            data = np.load(self.entries_list[index + i].data_path).T
+            data = self.scale(np.load(self.entries_list[index + i].data_path)).T
             X_data[i, 0:data.shape[0], :] = data
             labels[i, :] = self.Y_data[index + i]
             input_length[i] = data.shape[0]
@@ -174,6 +187,13 @@ class TextImageGenerator(keras.callbacks.Callback):
 
         outputs = {'ctc': np.zeros([size])}  # dummy data for dummy loss function
         return inputs, outputs
+
+    def scale(self, array):
+        for i in range(len(self.mean_variance)):
+            array[i,] -= self.mean_variance[i][Constants.TUPLE_INDEX_MEAN]
+            array[i,] /= self.mean_variance[i][Constants.TUPLE_INDEX_STD]
+
+        return array
 
     def next_train(self):
         while 1:
@@ -220,7 +240,38 @@ def ctc_lambda_func(args):
     # the 2 is critical here since the first couple outputs of the RNN
     # tend to be garbage:
     y_pred = y_pred[:, 2:, :]
-    return K.ctc_batch_cost(labels, y_pred, input_length, label_length)
+    # return K.ctc_batch_cost(labels, y_pred, input_length, label_length)
+    return ctc_batch_cost(labels, y_pred, input_length, label_length)
+
+
+# copied code from Keras to be able to add ignore_longer_outputs_than_inputs=True
+def ctc_batch_cost(y_true, y_pred, input_length, label_length):
+    """Runs CTC loss algorithm on each batch element.
+
+    # Arguments
+        y_true: tensor `(samples, max_string_length)`
+            containing the truth labels.
+        y_pred: tensor `(samples, time_steps, num_categories)`
+            containing the prediction, or output of the softmax.
+        input_length: tensor `(samples, 1)` containing the sequence length for
+            each batch item in `y_pred`.
+        label_length: tensor `(samples, 1)` containing the sequence length for
+            each batch item in `y_true`.
+
+    # Returns
+        Tensor with shape (samples,1) containing the
+            CTC loss of each element.
+    """
+    label_length = tf.to_int32(tf.squeeze(label_length, axis=-1))
+    input_length = tf.to_int32(tf.squeeze(input_length, axis=-1))
+    sparse_labels = tf.to_int32(ctc_label_dense_to_sparse(y_true, label_length))
+
+    y_pred = tf.log(tf.transpose(y_pred, perm=[1, 0, 2]) + epsilon())
+
+    return tf.expand_dims(ctc.ctc_loss(inputs=y_pred,
+                                       labels=sparse_labels,
+                                       sequence_length=input_length,
+                                       ignore_longer_outputs_than_inputs=True), 1)
 
 
 # def decode_batch(test_func, word_batch):
@@ -309,12 +360,12 @@ def train(run_name, start_epoch, stop_epoch):
 
     # Two layers of bidirectional GRUs
     # GRU seems to work as well, if not better than LSTM:
-    gru_1 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(network_output)
-    gru_1b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
+    gru_1 = LSTM(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(network_output)
+    gru_1b = LSTM(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
         network_output)
     gru1_merged = add([gru_1, gru_1b])
-    gru_2 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
-    gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
+    gru_2 = LSTM(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
+    gru_2b = LSTM(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
         gru1_merged)
 
     # transforms RNN output to character activations:
@@ -354,7 +405,7 @@ def train(run_name, start_epoch, stop_epoch):
 
 run_name = datetime.datetime.now().strftime('%Y:%m:%d:%H:%M:%S')
 
-history = train(run_name, 0, 2)
+history = train(run_name, 0, 20)
 
 print(history.history.keys())
 # summarize history for accuracy
