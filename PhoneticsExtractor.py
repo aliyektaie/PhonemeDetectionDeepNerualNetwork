@@ -51,11 +51,7 @@ def get_database_phonetics_alphabets(dataset):
                 result.add(symbol)
 
     temp = list(result)
-    result = [' ']
-    for t in temp:
-        result.append(t)
-
-    return result
+    return temp
 
 
 def load_dataset():
@@ -137,8 +133,24 @@ def load_model_dataset(dataset, alphabet):
     return model_dataset_train, model_dataset_validation, input_shape, mean_variance, max_phonetics_length
 
 
+def save_sample(dataset, alphabet):
+    index = ''
+
+    for entry in dataset.entries:
+        index += f'{entry.word}\t{entry.phonetics}\t{entry.audioCount}\n'
+
+    file = open("/Volumes/Files/Georgetown/Advanced Machine Learning/Project Data/DataSet/index_sample.txt", "w")
+    file.write(index)
+    file.close()
+
+    file = open("/Volumes/Files/Georgetown/Advanced Machine Learning/Project Data/DataSet/alphabet_sample.txt", "w")
+    file.write(',,'.join(alphabet))
+    file.close()
+
+
 def main():
     dataset, alphabet = load_dataset()
+    save_sample(dataset, alphabet)
     train_set, validation_set, input_shape, features_mean_variance, max_phonetics_length = load_model_dataset(dataset,
                                                                                                               alphabet)
 
