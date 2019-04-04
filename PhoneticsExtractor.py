@@ -25,7 +25,7 @@ TRAINING_SET_ENTRIES_PATH = ''
 VALIDATION_SET_ENTRIES_PATH = ''
 MODEL_SAVE_LOCATION = ''
 MIN_SAMPLE_PHONEME_FREQUENCY = 100
-MAX_SAMPLE_PHONEME_FREQUENCY = 100
+MAX_SAMPLE_PHONEME_FREQUENCY = 550
 
 
 def create_keras_model(model_name, input_shape, alphabet_size, max_phonetics_length):
@@ -147,8 +147,10 @@ def load_model_dataset(dataset, alphabet):
 def save_sample(dataset, alphabet):
     index = ''
 
+    total = 0
     for entry in dataset.entries:
         index += f'{entry.word}\t{entry.phonetics}\t{entry.audioCount}\n'
+        total += entry.audioCount
 
     file = open("/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/index_sample.txt", "w")
     file.write(index)
@@ -157,6 +159,8 @@ def save_sample(dataset, alphabet):
     file = open("/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/alphabet_sample.txt", "w")
     file.write(',,'.join(alphabet))
     file.close()
+
+    print('Total example: ' + str(total))
 
 
 def main():

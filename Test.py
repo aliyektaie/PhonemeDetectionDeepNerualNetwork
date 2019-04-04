@@ -25,7 +25,7 @@ TRAIN_ALPHABET_FILE = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project
 OUTPUT_DIR = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Output'
 MAX_LENGTH_IN_TIME = 185
 FEATURE_COUNT = 15
-DATASET_SIZE = 1024
+DATASET_SIZE = 1024 * 16
 
 
 def load_alphabet():
@@ -405,7 +405,7 @@ def train(run_name, start_epoch, stop_epoch):
 
 run_name = datetime.datetime.now().strftime('%Y:%m:%d:%H:%M:%S')
 
-history = train(run_name, 0, 20)
+history = train(run_name, 0, 10)
 
 print(history.history.keys())
 # summarize history for accuracy
