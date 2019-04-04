@@ -400,6 +400,7 @@ def train(run_name, start_epoch, stop_epoch):
                                validation_data=data_gen.next_val(),
                                validation_steps=val_words // mini_batch_size,
                                callbacks=[data_gen],
+                               shuffle=True,
                                initial_epoch=start_epoch)
 
 
