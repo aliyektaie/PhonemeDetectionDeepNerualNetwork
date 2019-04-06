@@ -1,3 +1,5 @@
+import editdistance
+import itertools
 import os
 import datetime
 import numpy as np
@@ -25,7 +27,7 @@ TRAIN_ALPHABET_FILE = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project
 OUTPUT_DIR = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Output'
 MAX_LENGTH_IN_TIME = 185
 FEATURE_COUNT = 15
-DATASET_SIZE = 1024 * 16
+DATASET_SIZE = 1024
 
 
 def load_alphabet():
@@ -90,11 +92,12 @@ class TrainEntry:
         self.word = None
         self.phonetics = None
         self.data_path = None
+        self.index = 0
 
 
 # Uses generator functions to supply train/test with
 # data.
-class TextImageGenerator(keras.callbacks.Callback):
+class AudioDataFeatureGenerator(keras.callbacks.Callback):
 
     def __init__(self, dataset_index_file, mini_batch_size, val_split, absolute_max_string_len=57):
         self.mini_batch_size = mini_batch_size
@@ -113,11 +116,15 @@ class TextImageGenerator(keras.callbacks.Callback):
         self.cur_train_index = 0
         self.mean_variance = None
 
+    def get_batch_count(self):
+        return len(self.entries_list) // self.mini_batch_size
+
     def get_output_size(self):
         return len(alphabet) + 1
 
     # num_example can be independent of the epoch size due to the use of generators
     def build_sample_list(self, num_example):
+        print('Building sample list')
         assert num_example % self.mini_batch_size == 0
         assert (self.val_split * num_example) % self.mini_batch_size == 0
 
@@ -141,6 +148,7 @@ class TextImageGenerator(keras.callbacks.Callback):
 
                 sample = TrainEntry()
                 sample.word = entry.word
+                sample.index = j
                 sample.phonetics = entry.get_phonetics_char_array()
                 folder = FEATURE_PATH + sample.word[0: min(2, len(sample.word))] + Constants.SLASH
                 _id = sample.word + '_' + str(j)
@@ -171,18 +179,25 @@ class TextImageGenerator(keras.callbacks.Callback):
         labels = np.ones([size, self.absolute_max_string_len])
         input_length = np.zeros([size, 1])
         label_length = np.zeros([size, 1])
+
+        source_phonetics = []
+        source_phonetics_idx = []
         for i in range(size):
             data = self.scale(np.load(self.entries_list[index + i].data_path)).T
             X_data[i, 0:data.shape[0], :] = data
             labels[i, :] = self.Y_data[index + i]
             input_length[i] = data.shape[0]
             label_length[i] = self.Y_len[index + i]
+            source_phonetics.append(''.join(self.entries_list[index + i].phonetics))
+            source_phonetics_idx.append(self.entries_list[index + i].index)
 
         inputs = {
             'the_input': X_data,
             'the_labels': labels,
             'input_length': input_length,
             'label_length': label_length,
+            'source_str': source_phonetics,
+            'source_str_ex_idx': source_phonetics_idx
         }
 
         outputs = {'ctc': np.zeros([size])}  # dummy data for dummy loss function
@@ -234,7 +249,6 @@ class TextImageGenerator(keras.callbacks.Callback):
 
 # the actual loss calc occurs here despite it not being
 # an internal Keras loss function
-
 def ctc_lambda_func(args):
     y_pred, labels, input_length, label_length = args
     # the 2 is critical here since the first couple outputs of the RNN
@@ -274,67 +288,116 @@ def ctc_batch_cost(y_true, y_pred, input_length, label_length):
                                        ignore_longer_outputs_than_inputs=True), 1)
 
 
-# def decode_batch(test_func, word_batch):
-#     out = test_func([word_batch])[0]
-#     ret = []
-#     for j in range(out.shape[0]):
-#         out_best = list(np.argmax(out[j, 2:], 1))
-#         out_best = [k for k, g in itertools.groupby(out_best)]
-#         outstr = labels_to_text(out_best)
-#         ret.append(outstr)
-#     return ret
-#
-#
-# class VizCallback(keras.callbacks.Callback):
-#
-#     def __init__(self, run_name, test_func, text_img_gen, num_display_words=6):
-#         self.test_func = test_func
-#         self.output_dir = os.path.join(
-#             OUTPUT_DIR, run_name)
-#         self.text_img_gen = text_img_gen
-#         self.num_display_words = num_display_words
-#         if not os.path.exists(self.output_dir):
-#             os.makedirs(self.output_dir)
-#
-#     def show_edit_distance(self, num):
-#         num_left = num
-#         mean_norm_ed = 0.0
-#         mean_ed = 0.0
-#         while num_left > 0:
-#             word_batch = next(self.text_img_gen)[0]
-#             num_proc = min(word_batch['the_input'].shape[0], num_left)
-#             decoded_res = decode_batch(self.test_func, word_batch['the_input'][0:num_proc])
-#             for j in range(num_proc):
-#                 edit_dist = editdistance.eval(decoded_res[j], word_batch['source_str'][j])
-#                 mean_ed += float(edit_dist)
-#                 mean_norm_ed += float(edit_dist) / len(word_batch['source_str'][j])
-#             num_left -= num_proc
-#         mean_norm_ed = mean_norm_ed / num
-#         mean_ed = mean_ed / num
-#         print('\nOut of %d samples:  Mean edit distance: %.3f Mean normalized edit distance: %0.3f'
-#               % (num, mean_ed, mean_norm_ed))
-#
-#     def on_epoch_end(self, epoch, logs={}):
-#         self.model.save_weights(os.path.join(self.output_dir, 'weights%02d.h5' % (epoch)))
-#         self.show_edit_distance(256)
-#         word_batch = next(self.text_img_gen)[0]
-#         res = decode_batch(self.test_func, word_batch['the_input'][0:self.num_display_words])
-#         if word_batch['the_input'][0].shape[0] < 256:
-#             cols = 2
-#         else:
-#             cols = 1
-#         for i in range(self.num_display_words):
-#             plt.subplot(self.num_display_words // cols, cols, i + 1)
-#             if K.image_data_format() == 'channels_first':
-#                 the_input = word_batch['the_input'][i, 0, :, :]
-#             else:
-#                 the_input = word_batch['the_input'][i, :, :, 0]
-#             plt.imshow(the_input.T, cmap='Greys_r')
-#             plt.xlabel('Truth = \'%s\'\nDecoded = \'%s\'' % (word_batch['source_str'][i], res[i]))
-#         fig = pylab.gcf()
-#         fig.set_size_inches(10, 13)
-#         plt.savefig(os.path.join(self.output_dir, 'e%02d.png' % (epoch)))
-#         plt.close()
+def decode_batch(test_func, word_batch):
+    out = test_func([word_batch])[0]
+    ret_1 = []
+
+    for j in range(out.shape[0]):
+        single_out = out[j, 2:]
+        argmax_1 = np.argmax(single_out, 1)
+
+        out_best_1 = list(argmax_1)
+        out_best_1 = [k for k, g in itertools.groupby(out_best_1)]
+        outstr_1 = labels_to_text(out_best_1)
+        ret_1.append(outstr_1)
+
+    return ret_1
+
+
+class VizCallback(keras.callbacks.Callback):
+
+    def __init__(self, run_name, test_func, data_gen_next, data_gen, num_display_words=6):
+        self.test_func = test_func
+        self.output_dir = os.path.join(OUTPUT_DIR, run_name)
+        self.data_gen_next = data_gen_next
+        self.data_gen = data_gen
+        self.num_display_words = data_gen.mini_batch_size
+        self.epochs_result = {}
+        self.accuracy = []
+        self.all_phonetics = []
+
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
+
+    def show_edit_distance(self, epoch):
+        result = {}
+        num = self.data_gen.get_batch_count() * self.data_gen.mini_batch_size
+
+        num_left = num
+        mean_norm_ed = 0.0
+        mean_ed = 0.0
+        mean_ed_sq = 0.0
+        count = 0
+        while num_left > 0:
+            word_batch = next(self.data_gen_next)[0]
+            num_proc = min(word_batch['the_input'].shape[0], num_left)
+            decoded_res = decode_batch(self.test_func, word_batch['the_input'][0:num_proc])
+            for j in range(num_proc):
+                edit_dist = editdistance.eval(decoded_res[j], word_batch['source_str'][j])
+                mean_ed += float(edit_dist)
+                mean_ed_sq += (float(edit_dist) * float(edit_dist))
+                mean_norm_ed += float(edit_dist) / len(word_batch['source_str'][j])
+                count += 1
+
+                phonetics = word_batch['source_str'][j] + '      [' + str(word_batch['source_str_ex_idx'][j]) + ']'
+                if phonetics not in self.all_phonetics:
+                    self.all_phonetics.append(phonetics)
+
+                result[phonetics] = {
+                    'prediction': decoded_res[j],
+                    'edit_distance': float(edit_dist)
+                }
+
+            num_left -= num_proc
+        mean_norm_ed = mean_norm_ed / count
+        mean_ed = mean_ed / count
+        st_dev = np.sqrt(mean_ed_sq / count + (mean_ed * mean_ed))
+        print('\nOut of %d samples:  Mean edit distance: %.3f +- %.3f Mean normalized edit distance: %0.3f'
+              % (count, mean_ed, st_dev, mean_norm_ed))
+        self.accuracy.append('%d,%.3f,%.3f' % (epoch, mean_ed, st_dev))
+
+        return result
+
+    def on_epoch_end(self, epoch, logs={}):
+        self.model.save_weights(os.path.join(self.output_dir, 'weights%02d.h5' % (epoch)))
+        self.epochs_result[epoch] = self.show_edit_distance(epoch)
+        self.save_results_as_csv(epoch)
+
+    def save_results_as_csv(self, epoch):
+        epoch += 1
+        path = os.path.join(self.output_dir, 'predictions.csv')
+
+        file = open(path, "w")
+        file.write('Original Phonetics')
+
+        for i in range(epoch):
+            file.write(f',Prediction Epoch {epoch},Distance Epoch {epoch}')
+
+        file.write('\n')
+
+        for phonetics in self.all_phonetics:
+            file.write(phonetics)
+            for e in range(epoch):
+                pred = ''
+                distance = ''
+
+                if phonetics in self.epochs_result[e]:
+                    pred = self.epochs_result[e][phonetics]['prediction']
+                    pred = pred.replace('"', '').replace(',', '')
+                    distance = self.epochs_result[e][phonetics]['edit_distance']
+                file.write(f',"{pred}",{distance}')
+
+            file.write('\n')
+
+        file.close()
+
+        path = os.path.join(self.output_dir, 'accuracy.csv')
+        file = open(path, "w")
+
+        for line in self.accuracy:
+            file.write(line + '\n')
+
+        file.close()
 
 
 def train(run_name, start_epoch, stop_epoch):
@@ -345,33 +408,14 @@ def train(run_name, start_epoch, stop_epoch):
     val_words = int(example_per_epoch * (val_split))
 
     # Network parameters
-    rnn_size = 64
     mini_batch_size = 32
 
     input_shape = (None, FEATURE_COUNT)
 
-    data_gen = TextImageGenerator(TRAIN_INDEX_FILE, mini_batch_size, example_per_epoch - val_words)
+    data_gen = AudioDataFeatureGenerator(TRAIN_INDEX_FILE, mini_batch_size, example_per_epoch - val_words)
 
     act = 'relu'
-    network_output = Input(name='the_input', shape=input_shape, dtype='float32')
-    input_data = network_output
-
-    # inner = Dense(time_dense_size, activation=act, name='dense1')(input_shape)
-
-    # Two layers of bidirectional GRUs
-    # GRU seems to work as well, if not better than LSTM:
-    gru_1 = LSTM(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(network_output)
-    gru_1b = LSTM(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
-        network_output)
-    gru1_merged = add([gru_1, gru_1b])
-    gru_2 = LSTM(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
-    gru_2b = LSTM(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
-        gru1_merged)
-
-    # transforms RNN output to character activations:
-    network_output = Dense(data_gen.get_output_size(), kernel_initializer='he_normal',
-                           name='dense2')(concatenate([gru_2, gru_2b]))
-    y_pred = Activation('softmax', name='softmax')(network_output)
+    input_data, y_pred = create_model_structure_before_ctc(data_gen, input_shape)
     Model(inputs=input_data, outputs=y_pred).summary()
 
     labels = Input(name='the_labels', shape=[data_gen.absolute_max_string_len], dtype='float32')
@@ -391,37 +435,69 @@ def train(run_name, start_epoch, stop_epoch):
     if start_epoch > 0:
         weight_file = os.path.join(OUTPUT_DIR, os.path.join(run_name, 'weights%02d.h5' % (start_epoch - 1)))
         model.load_weights(weight_file)
+
     # captures output of softmax so we can decode the output during visualization
     test_func = K.function([input_data], [y_pred])
+    viz_cb = VizCallback(run_name, test_func, data_gen.next_val(), data_gen)
 
     return model.fit_generator(generator=data_gen.next_train(),
                                steps_per_epoch=(example_per_epoch - val_words) // mini_batch_size,
                                epochs=stop_epoch,
                                validation_data=data_gen.next_val(),
                                validation_steps=val_words // mini_batch_size,
-                               callbacks=[data_gen],
+                               callbacks=[data_gen, viz_cb],
                                shuffle=True,
                                initial_epoch=start_epoch)
 
 
-run_name = datetime.datetime.now().strftime('%Y:%m:%d:%H:%M:%S')
+def create_model_structure_before_ctc(data_gen, input_shape):
+    rnn_size = 512
 
-history = train(run_name, 0, 10)
+    network_output = Input(name='the_input', shape=input_shape, dtype='float32')
+    input_data = network_output
 
-print(history.history.keys())
-# summarize history for accuracy
-plt.plot(history.history['acc'])
-plt.plot(history.history['val_acc'])
-plt.title('model accuracy')
-plt.ylabel('accuracy')
-plt.xlabel('epoch')
-plt.legend(['train', 'test'], loc='upper left')
-plt.show()
-# summarize history for loss
-plt.plot(history.history['loss'])
-plt.plot(history.history['val_loss'])
-plt.title('model loss')
-plt.ylabel('loss')
-plt.xlabel('epoch')
-plt.legend(['train', 'test'], loc='upper left')
-plt.show()
+    # Two layers of bidirectional GRUs
+    # GRU seems to work as well, if not better than LSTM:
+    gru_1 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(network_output)
+    gru_1b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
+        network_output)
+    gru1_merged = add([gru_1, gru_1b])
+    gru_2 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
+    gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
+        gru1_merged)
+
+    # transforms RNN output to character activations:
+    network_output = Dense(300, kernel_initializer='he_normal', activation='relu',
+                           name='dense2')(concatenate([gru_2, gru_2b]))
+
+    network_output = Dense(200, kernel_initializer='he_normal', activation='tanh',
+                           name='dense3')(network_output)
+
+    network_output = Dense(data_gen.get_output_size(), kernel_initializer='he_normal',
+                           name='dense4')(network_output)
+
+    y_pred = Activation('softmax', name='softmax')(network_output)
+    return input_data, y_pred
+
+
+run_name = datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')
+
+history = train(run_name, 0, 30)
+
+# print(history.history.keys())
+# # summarize history for accuracy
+# plt.plot(history.history['acc'])
+# plt.plot(history.history['val_acc'])
+# plt.title('model accuracy')
+# plt.ylabel('accuracy')
+# plt.xlabel('epoch')
+# plt.legend(['train', 'test'], loc='upper left')
+# plt.show()
+# # summarize history for loss
+# plt.plot(history.history['loss'])
+# plt.plot(history.history['val_loss'])
+# plt.title('model loss')
+# plt.ylabel('loss')
+# plt.xlabel('epoch')
+# plt.legend(['train', 'test'], loc='upper left')
+# plt.show()
