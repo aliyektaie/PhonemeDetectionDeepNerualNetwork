@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from keras.backend.tensorflow_backend import ctc_label_dense_to_sparse
 from tensorflow.python.ops import ctc_ops as ctc
 from keras.backend.common import epsilon
+from random import shuffle
 
 import Constants
 import FeatureExtractor
@@ -27,7 +28,8 @@ TRAIN_ALPHABET_FILE = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project
 OUTPUT_DIR = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Output'
 MAX_LENGTH_IN_TIME = 185
 FEATURE_COUNT = 15
-DATASET_SIZE = 1024
+DATASET_SIZE = 610000
+DATASET_SIZE = (DATASET_SIZE // 32) * 32
 
 
 def load_alphabet():
@@ -129,16 +131,20 @@ class AudioDataFeatureGenerator(keras.callbacks.Callback):
         assert (self.val_split * num_example) % self.mini_batch_size == 0
 
         self.num_example = num_example
-        self.entries_list = [None] * self.num_example
+        self.entries_list = []
 
         self.Y_data = np.ones([self.num_example, self.absolute_max_string_len]) * -1
         self.Y_len = [0] * self.num_example
 
         ds = DataSet(self.dataset_index_file)
+        shuffle(ds.entries)
 
         num_sample_loaded = 0
         audio_ids = []
         for i, entry in enumerate(ds.entries):
+            if i % 500 == 0:
+                print(f'Loading: {i} of {len(ds.entries)}')
+
             if i == self.num_example or num_sample_loaded >= self.num_example:
                 break
 
@@ -154,7 +160,7 @@ class AudioDataFeatureGenerator(keras.callbacks.Callback):
                 _id = sample.word + '_' + str(j)
                 audio_ids.append(_id)
                 sample.data_path = folder + _id + '.npy'
-                self.entries_list[num_sample_loaded] = sample
+                self.entries_list.append(sample)
                 num_sample_loaded += 1
 
         if num_sample_loaded != self.num_example:
@@ -183,7 +189,11 @@ class AudioDataFeatureGenerator(keras.callbacks.Callback):
         source_phonetics = []
         source_phonetics_idx = []
         for i in range(size):
-            data = self.scale(np.load(self.entries_list[index + i].data_path)).T
+            ii = index + i
+            entry = self.entries_list[ii]
+            data_path = entry.data_path
+            content = np.load(data_path)
+            data = self.scale(content).T
             X_data[i, 0:data.shape[0], :] = data
             labels[i, :] = self.Y_data[index + i]
             input_length[i] = data.shape[0]
@@ -232,6 +242,7 @@ class AudioDataFeatureGenerator(keras.callbacks.Callback):
         self.build_sample_list(DATASET_SIZE)
 
     def on_epoch_begin(self, epoch, logs={}):
+        # self.build_sample_list(DATASET_SIZE)
         # # rebind the paint function to implement curriculum learning
         # if 3 <= epoch < 6:
         #     self.paint_func = lambda text: paint_text(text, self.img_w, self.img_h,
@@ -458,17 +469,12 @@ def create_model_structure_before_ctc(data_gen, input_shape):
 
     # Two layers of bidirectional GRUs
     # GRU seems to work as well, if not better than LSTM:
-    gru_1 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(network_output)
-    gru_1b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
-        network_output)
-    gru1_merged = add([gru_1, gru_1b])
-    gru_2 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
-    gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
-        gru1_merged)
+    network_output = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(network_output)
+    network_output = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(network_output)
 
     # transforms RNN output to character activations:
     network_output = Dense(300, kernel_initializer='he_normal', activation='relu',
-                           name='dense2')(concatenate([gru_2, gru_2b]))
+                           name='dense2')(network_output)
 
     network_output = Dense(200, kernel_initializer='he_normal', activation='tanh',
                            name='dense3')(network_output)
