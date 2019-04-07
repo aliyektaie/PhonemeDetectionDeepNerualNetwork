@@ -82,6 +82,27 @@ def extract_mfcc_bandpass_features(input_file, output_file, feature_shapes):
     return flatten_features(mfccs)
 
 
+def add_delta_features_to_mfcc(mfccs):
+    result = numpy.zeros([mfccs.shape[1], Constants.MFCC_COEFFICIENT_COUNT, 3], dtype='float')
+
+    mfccs = mfccs.T
+    for i in range(mfccs.shape[0]):
+        for j in range(mfccs.shape[1]):
+            result[i, j, 0] = mfccs[i, j]
+
+    # delta of mfcc
+    for i in range(1, mfccs.shape[0]):
+        for j in range(mfccs.shape[1]):
+            result[i, j, 1] = mfccs[i, j] - mfccs[i - 1, j]
+
+    # delta-delta of mfcc
+    for i in range(mfccs.shape[0]):
+        for j in range(1, mfccs.shape[1]):
+            result[i, j, 2] = result[i, j, 1] - result[i - 1, j, 1]
+
+    return result
+
+
 def extract_mfcc_features(input_file, output_file, feature_shapes):
     if not os.path.isfile(input_file):
         return []
@@ -91,7 +112,8 @@ def extract_mfcc_features(input_file, output_file, feature_shapes):
                                  sr=Constants.AUDIO_FILES_SAMPLING_RATE,
                                  n_mfcc=Constants.MFCC_COEFFICIENT_COUNT)
 
-    numpy.save(output_file, mfccs)
+    delta_added = add_delta_features_to_mfcc(mfccs)
+    numpy.save(output_file, delta_added)
     feature_shapes.append(mfccs.shape)
 
     if Constants.SAVE_MFCC_IMAGE:
@@ -129,7 +151,7 @@ def get_input_shape_and_normalizers_of_entry_list(feature_folder, ids):
         word = id[0:id.index('_')]
         path = feature_folder + word[0: min(2, len(word))] + Constants.SLASH + id + '.npy'
 
-        data = numpy.load(path)
+        data = numpy.load(path)[:, :, 0].T
         _x, _y = data.shape
 
         if x == 0:

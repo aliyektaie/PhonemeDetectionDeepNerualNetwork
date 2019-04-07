@@ -4,7 +4,7 @@ import os
 import datetime
 import numpy as np
 from keras import backend as K
-from keras.layers import Input, Dense, Activation, LSTM
+from keras.layers import Input, Dense, Activation, LSTM, Conv2D, MaxPooling2D, Reshape, Conv3D
 from keras.layers import Lambda
 from keras.layers.merge import add, concatenate
 from keras.models import Model
@@ -27,8 +27,8 @@ FEATURE_PATH = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/D
 TRAIN_ALPHABET_FILE = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/alphabet_sample.txt'
 OUTPUT_DIR = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Output'
 MAX_LENGTH_IN_TIME = 185
-FEATURE_COUNT = 15
-DATASET_SIZE = 610000
+FEATURE_COUNT = Constants.MFCC_COEFFICIENT_COUNT
+DATASET_SIZE = 1024
 DATASET_SIZE = (DATASET_SIZE // 32) * 32
 
 
@@ -180,7 +180,7 @@ class AudioDataFeatureGenerator(keras.callbacks.Callback):
         self.cur_train_index = 0
 
     def get_batch(self, index, size):
-        X_data = np.ones([size, self.img_h, self.img_w])
+        X_data = np.ones([size, self.img_h, self.img_w, 3])
 
         labels = np.ones([size, self.absolute_max_string_len])
         input_length = np.zeros([size, 1])
@@ -193,8 +193,8 @@ class AudioDataFeatureGenerator(keras.callbacks.Callback):
             entry = self.entries_list[ii]
             data_path = entry.data_path
             content = np.load(data_path)
-            data = self.scale(content).T
-            X_data[i, 0:data.shape[0], :] = data
+            data = self.scale(content)
+            X_data[i, 0:data.shape[0], :, :] = data
             labels[i, :] = self.Y_data[index + i]
             input_length[i] = data.shape[0]
             label_length[i] = self.Y_len[index + i]
@@ -215,8 +215,12 @@ class AudioDataFeatureGenerator(keras.callbacks.Callback):
 
     def scale(self, array):
         for i in range(len(self.mean_variance)):
-            array[i,] -= self.mean_variance[i][Constants.TUPLE_INDEX_MEAN]
-            array[i,] /= self.mean_variance[i][Constants.TUPLE_INDEX_STD]
+            array[i,:, 0] -= self.mean_variance[i][Constants.TUPLE_INDEX_MEAN]
+            array[i,:, 0] /= self.mean_variance[i][Constants.TUPLE_INDEX_STD]
+            array[i,:, 1] -= self.mean_variance[i][Constants.TUPLE_INDEX_MEAN]
+            array[i,:, 1] /= self.mean_variance[i][Constants.TUPLE_INDEX_STD]
+            array[i,:, 2] -= self.mean_variance[i][Constants.TUPLE_INDEX_MEAN]
+            array[i,:, 2] /= self.mean_variance[i][Constants.TUPLE_INDEX_STD]
 
         return array
 
@@ -421,7 +425,7 @@ def train(run_name, start_epoch, stop_epoch):
     # Network parameters
     mini_batch_size = 32
 
-    input_shape = (None, FEATURE_COUNT)
+    input_shape = (None, FEATURE_COUNT, 3)
 
     data_gen = AudioDataFeatureGenerator(TRAIN_INDEX_FILE, mini_batch_size, example_per_epoch - val_words)
 
@@ -462,10 +466,35 @@ def train(run_name, start_epoch, stop_epoch):
 
 
 def create_model_structure_before_ctc(data_gen, input_shape):
+    # Network parameters
+    conv_filters = 16
+    kernel_size = (3, 3)
+    pool_size = 2
+    time_dense_size = 32
     rnn_size = 512
 
-    network_output = Input(name='the_input', shape=input_shape, dtype='float32')
-    input_data = network_output
+    input_data = Input(name='the_input', shape=input_shape, dtype='float32')
+    act = 'relu'
+
+    # convolution layers
+    inner = Conv2D(conv_filters, kernel_size, padding='same',
+                   activation=act, kernel_initializer='he_normal',
+                   name='conv1')(input_data)
+
+    inner = MaxPooling2D(pool_size=(pool_size, pool_size), name='max1')(inner)
+
+    inner = Conv2D(conv_filters, kernel_size, padding='same',
+                   activation=act, kernel_initializer='he_normal',
+                   name='conv2')(inner)
+    inner = MaxPooling2D(pool_size=(pool_size, pool_size), name='max2')(inner)
+
+    conv_to_rnn_dims = (MAX_LENGTH_IN_TIME // (pool_size ** 2), (FEATURE_COUNT // (pool_size ** 2)) * conv_filters)
+    inner = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(inner)
+
+    # cuts down input size going into RNN:
+    inner = Dense(time_dense_size, activation=act, name='dense1')(inner)
+
+    network_output = inner
 
     # Two layers of bidirectional GRUs
     # GRU seems to work as well, if not better than LSTM:
@@ -473,10 +502,7 @@ def create_model_structure_before_ctc(data_gen, input_shape):
     network_output = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(network_output)
 
     # transforms RNN output to character activations:
-    network_output = Dense(300, kernel_initializer='he_normal', activation='relu',
-                           name='dense2')(network_output)
-
-    network_output = Dense(200, kernel_initializer='he_normal', activation='tanh',
+    network_output = Dense(200, kernel_initializer='he_normal', activation='relu',
                            name='dense3')(network_output)
 
     network_output = Dense(data_gen.get_output_size(), kernel_initializer='he_normal',
