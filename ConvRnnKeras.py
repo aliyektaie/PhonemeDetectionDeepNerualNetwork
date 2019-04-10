@@ -2,7 +2,7 @@ import editdistance
 import itertools
 
 from keras import Input, Model
-from keras.layers import Conv2D, MaxPooling2D, Reshape, Dense, GRU, add, Activation, concatenate, Lambda
+from keras.layers import Conv2D, MaxPooling2D, Reshape, Dense, GRU, add, Activation, concatenate, Lambda, LSTM
 from keras.optimizers import SGD
 import matplotlib.pyplot as plt
 
@@ -17,14 +17,15 @@ from keras.backend.common import epsilon
 from keras import backend as K
 import sys
 
-CONV_LAYERS_COUNT = 3
+CONV_LAYERS_COUNT = 4
 POOL_SIZE = 2
-PADDED_FEATURE_SHAPE_INPUT = (185, 20, 3)
+PADDED_FEATURE_SHAPE_INPUT = (980, 20, 3)
 # NUMBER_OF_SAMPLE_TO_TRAIN_ON = 404355
 NUMBER_OF_SAMPLE_TO_TRAIN_ON = 10000
 NUMBER_OF_RNN_LAYERS = 2
-BATCH_SIZE = 256
-VALIDATION_PORTION = 0.0
+RNN_COUNT = 256
+BATCH_SIZE = 32
+VALIDATION_PORTION = 0.1
 MAX_PHONETICS_LEN = 30
 MIN_PHONETICS_LEN = 3
 FEATURE_FOLDER_NAME = 'mfcc_balanced'
@@ -235,8 +236,8 @@ class VisualizationCallback(keras.callbacks.Callback):
 
     def on_epoch_end(self, epoch=0, logs={}):
         self.model.save_weights(os.path.join(self.output_dir, 'weights%02d.h5' % (epoch)))
-        # self.epochs_result[epoch] = self.show_edit_distance(epoch)
-        # self.save_results_as_csv(epoch)
+        self.epochs_result[epoch] = self.show_edit_distance(epoch)
+        self.save_results_as_csv(epoch)
 
     def save_results_as_csv(self, epoch):
         epoch += 1
@@ -510,7 +511,7 @@ def create_model():
     kernel_2d_size = (3, 3)
     pool_size = POOL_SIZE
     time_dense_size = 64
-    rnn_size = 20
+    rnn_size = RNN_COUNT
 
     act = 'relu'
     input_data = Input(name=NETWORK_INPUT_LAYER,
@@ -541,12 +542,12 @@ def create_model():
 
     # Two layers of bidirectional GRUs
     # GRU seems to work as well, if not better than LSTM:
-    gru_1 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(inner)
-    gru_1b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
+    gru_1 = LSTM(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(inner)
+    gru_1b = LSTM(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
         inner)
     gru1_merged = add([gru_1, gru_1b])
-    gru_2 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
-    gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
+    gru_2 = LSTM(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
+    gru_2b = LSTM(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
         gru1_merged)
 
     # transforms RNN output to character activations:
@@ -603,7 +604,7 @@ def try_training_model(dataset):
     result = True
     # try:
     model.fit_generator(generator=train_gen,
-                        # validation_data=validation_gen,
+                        validation_data=validation_gen,
                         callbacks=[viz_cb, train_gen],
                         steps_per_epoch=None,
                         epochs=20)

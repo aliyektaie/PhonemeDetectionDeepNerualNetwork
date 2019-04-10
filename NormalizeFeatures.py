@@ -1,7 +1,7 @@
 import os
 import numpy as np
 
-INPUT_FEATURE_FOLDER_NAME = 'mfcc'
+INPUT_FEATURE_FOLDER_NAME = 'mfcc2'
 OUTPUT_FEATURE_FOLDER_NAME = 'mfcc_balanced'
 FEATURE_FOLDER = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/Features/' \
                  + INPUT_FEATURE_FOLDER_NAME + '/'
@@ -30,12 +30,23 @@ def load_all_files(path):
 def save_normalized_features(files, means, stds):
     print('Loading all features files')
     count = len(files)
+    min_ts = 100
+    tss = []
 
     for ind, file in enumerate(files):
         if ind % 1000 == 0:
             print('   -> Processed %.1f%s' % (ind * 100.0 / count, '%'))
 
+        if not os.path.isfile(file):
+            continue
+
         data = np.load(file)
+
+        if data.shape[0] < 125:
+            continue
+
+        min_ts = min(min_ts, data.shape[0])
+        tss.append(data.shape[0])
         for i in range(means.shape[0]):
             for j in range(means.shape[1]):
                 data[:, i, j] -= means[i, j]
@@ -48,6 +59,11 @@ def save_normalized_features(files, means, stds):
             os.mkdir(folder)
 
         np.save(path, data)
+        os.remove(file)
+
+    print('Min time step: ' + str(min_ts))
+    print('Time step (avg): ' + str(np.average(np.array(tss))))
+    print('Time step (std): ' + str(np.std(np.array(tss))))
 
 
 def load_features_mean_std(files, count):

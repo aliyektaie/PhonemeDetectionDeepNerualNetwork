@@ -5,6 +5,7 @@ import numpy
 import matplotlib.pyplot as plt
 from scipy.signal import butter, lfilter
 import os
+from python_speech_features import mfcc
 
 
 def extract_features(method, input_file, output_file, feature_shapes):
@@ -13,6 +14,8 @@ def extract_features(method, input_file, output_file, feature_shapes):
         values = extract_mfcc_features(input_file, output_file, feature_shapes)
     elif method == 'mfcc+bandpass':
         values = extract_mfcc_bandpass_features(input_file, output_file, feature_shapes)
+    elif method == 'mfcc2':
+        values = extract_mfcc_alternative_features(input_file, output_file, feature_shapes)
     else:
         raise ValueError('Invalid method type')
 
@@ -111,6 +114,35 @@ def extract_mfcc_features(input_file, output_file, feature_shapes):
     mfccs = librosa.feature.mfcc(y=audio,
                                  sr=Constants.AUDIO_FILES_SAMPLING_RATE,
                                  n_mfcc=Constants.MFCC_COEFFICIENT_COUNT)
+
+    delta_added = add_delta_features_to_mfcc(mfccs)
+    numpy.save(output_file, delta_added)
+    feature_shapes.append(mfccs.shape)
+
+    if Constants.SAVE_MFCC_IMAGE:
+        plt.clf()
+        plt.figure(figsize=(8, 4))
+        librosa.display.specshow(mfccs, x_axis='time')
+        plt.colorbar()
+        path = output_file[output_file.rfind(Constants.SLASH) + 1:]
+        plt.title(f'MFCC ({path})')
+        plt.tight_layout()
+        plt.savefig(output_file + '.png')
+        plt.close()
+
+    return flatten_features(mfccs)
+
+
+def extract_mfcc_alternative_features(input_file, output_file, feature_shapes):
+    if not os.path.isfile(input_file):
+        return []
+
+    audio, _ = librosa.core.load(input_file, mono=True, sr=None)
+    mfccs = mfcc(audio,
+                 Constants.AUDIO_FILES_SAMPLING_RATE,
+                 numcep=Constants.MFCC_COEFFICIENT_COUNT,
+                 winlen=0.006,
+                 winstep=0.006).T
 
     delta_added = add_delta_features_to_mfcc(mfccs)
     numpy.save(output_file, delta_added)

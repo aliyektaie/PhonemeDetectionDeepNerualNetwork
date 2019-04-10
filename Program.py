@@ -80,7 +80,7 @@ def extract_features(methods):
             if current % 50 == 0:
                 p = current * 100.0 / count
                 p = str(round(p, 2))
-                print(f'{current} of {count} (%{p})')
+                print(f'{current} of {count} (%{p})  -> {entry.word}')
 
         max_shape = [0, 0]
         for shape in feature_shapes:
