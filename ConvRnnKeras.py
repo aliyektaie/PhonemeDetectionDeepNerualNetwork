@@ -17,9 +17,11 @@ from keras.backend.common import epsilon
 from keras import backend as K
 import sys
 
+CONV_LAYERS_COUNT = 3
+POOL_SIZE = 2
 PADDED_FEATURE_SHAPE_INPUT = (185, 20, 3)
-NUMBER_OF_SAMPLE_TO_TRAIN_ON = 404355
-# NUMBER_OF_SAMPLE_TO_TRAIN_ON = 10000
+# NUMBER_OF_SAMPLE_TO_TRAIN_ON = 404355
+NUMBER_OF_SAMPLE_TO_TRAIN_ON = 10000
 NUMBER_OF_RNN_LAYERS = 2
 BATCH_SIZE = 256
 VALIDATION_PORTION = 0.0
@@ -142,7 +144,7 @@ class TrainDataGenerator(keras.utils.Sequence):
         dimensions = np.zeros((self.batch_size, 1))
 
         for i, sample in enumerate(samples_in_batch):
-            dimensions[i, 0] = sample.data.shape[0] // 4 - 2
+            dimensions[i, 0] = sample.data.shape[0] // (POOL_SIZE ** CONV_LAYERS_COUNT) - 2
 
         return dimensions
 
@@ -506,7 +508,7 @@ def create_model():
     # Network parameters
     conv_filters = 16
     kernel_2d_size = (3, 3)
-    pool_size = 2
+    pool_size = POOL_SIZE
     time_dense_size = 64
     rnn_size = 20
 
@@ -521,14 +523,17 @@ def create_model():
 
     inner = MaxPooling2D(pool_size=(pool_size, pool_size), name='max1')(inner)
 
-    inner = Conv2D(conv_filters, kernel_2d_size, padding='same',
-                   activation=act, kernel_initializer='he_normal',
-                   name='conv3')(inner)
+    for i in range(1, CONV_LAYERS_COUNT):
+        inner = Conv2D(conv_filters, kernel_2d_size, padding='same',
+                       activation=act, kernel_initializer='he_normal',
+                       name='conv' + str(i + 2))(inner)
 
-    inner = MaxPooling2D(pool_size=(pool_size, pool_size), name='max2')(inner)
+        inner = MaxPooling2D(pool_size=(pool_size, pool_size), name='max' + str(i+2))(inner)
 
     time_steps = PADDED_FEATURE_SHAPE_INPUT[0]
-    conv_to_rnn_dims = (time_steps // (pool_size ** 2), (feature_count_per_entry // (pool_size ** 2)) * conv_filters)
+    conv_to_rnn_dims = (time_steps // (pool_size ** CONV_LAYERS_COUNT),
+                        (feature_count_per_entry // (pool_size ** CONV_LAYERS_COUNT)) * conv_filters)
+
     inner = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(inner)
 
     # cuts down input size going into RNN:
@@ -550,7 +555,7 @@ def create_model():
                   name='dense2')(concatenate([gru_2, gru_2b]))
 
     y_pred = Activation('softmax', name='softmax')(inner)
-    # Model(inputs=input_data, outputs=y_pred).summary()
+    Model(inputs=input_data, outputs=y_pred).summary()
 
     labels = Input(name='the_labels', shape=[MAX_PHONETICS_LEN], dtype='float32')
     input_length = Input(name='input_length', shape=[1], dtype='int64')
