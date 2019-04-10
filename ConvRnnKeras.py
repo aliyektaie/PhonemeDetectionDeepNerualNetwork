@@ -18,10 +18,10 @@ from keras import backend as K
 import sys
 
 PADDED_FEATURE_SHAPE_INPUT = (185, 20, 3)
-# NUMBER_OF_SAMPLE_TO_TRAIN_ON = 404355
-NUMBER_OF_SAMPLE_TO_TRAIN_ON = 100000
+NUMBER_OF_SAMPLE_TO_TRAIN_ON = 404355
+# NUMBER_OF_SAMPLE_TO_TRAIN_ON = 10000
 NUMBER_OF_RNN_LAYERS = 2
-BATCH_SIZE = 64
+BATCH_SIZE = 256
 VALIDATION_PORTION = 0.0
 MAX_PHONETICS_LEN = 30
 MIN_PHONETICS_LEN = 3
@@ -233,8 +233,8 @@ class VisualizationCallback(keras.callbacks.Callback):
 
     def on_epoch_end(self, epoch=0, logs={}):
         self.model.save_weights(os.path.join(self.output_dir, 'weights%02d.h5' % (epoch)))
-        self.epochs_result[epoch] = self.show_edit_distance(epoch)
-        self.save_results_as_csv(epoch)
+        # self.epochs_result[epoch] = self.show_edit_distance(epoch)
+        # self.save_results_as_csv(epoch)
 
     def save_results_as_csv(self, epoch):
         epoch += 1
@@ -442,9 +442,7 @@ def get_network_output_size():
 # an internal Keras loss function
 def ctc_lambda_func(args):
     y_pred, labels, input_length, label_length = args
-    # the 2 is critical here since the first couple outputs of the RNN
-    # tend to be garbage:
-    y_pred = y_pred[:, NUMBER_OF_RNN_LAYERS:, :]
+    # y_pred = y_pred[:, 0:MAX_PHONETICS_LEN, :]
 
     # return K.ctc_batch_cost(labels, y_pred, input_length, label_length)
     return ctc_batch_cost(labels, y_pred, input_length, label_length)
@@ -484,12 +482,13 @@ def ctc_batch_cost(y_true, y_pred, input_length, label_length):
 
 
 def decode_batch(test_func, word_batch):
-    out = test_func([word_batch[NETWORK_INPUT_LAYER]])[0]
+    out = test_func([word_batch[NETWORK_INPUT_LAYER]])
+    out = out[0]
 
     ret_1 = []
 
     for j in range(out.shape[0]):
-        single_out = out[j, 2:]
+        single_out = out[j, 0:MAX_PHONETICS_LEN]
         argmax_1 = np.argmax(single_out, 1)
 
         out_best_1 = list(argmax_1)
@@ -509,7 +508,7 @@ def create_model():
     kernel_2d_size = (3, 3)
     pool_size = 2
     time_dense_size = 64
-    rnn_size = 32
+    rnn_size = 20
 
     act = 'relu'
     input_data = Input(name=NETWORK_INPUT_LAYER,
@@ -600,9 +599,9 @@ def try_training_model(dataset):
     # try:
     model.fit_generator(generator=train_gen,
                         # validation_data=validation_gen,
-                        # callbacks=[viz_cb, train_gen],
+                        callbacks=[viz_cb, train_gen],
                         steps_per_epoch=None,
-                        epochs=2)
+                        epochs=20)
     # except:
     #     result = False
 
