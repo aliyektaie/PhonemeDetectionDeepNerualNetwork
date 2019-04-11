@@ -17,17 +17,17 @@ from keras.backend.common import epsilon
 from keras import backend as K
 import sys
 
-CONV_LAYERS_COUNT = 4
+CONV_LAYERS_COUNT = 3
 POOL_SIZE = 2
-PADDED_FEATURE_SHAPE_INPUT = (980, 20, 3)
-# NUMBER_OF_SAMPLE_TO_TRAIN_ON = 404355
-NUMBER_OF_SAMPLE_TO_TRAIN_ON = 10000
+PADDED_FEATURE_SHAPE_INPUT = (185, 20, 3)
+# NUMBER_OF_SAMPLE_TO_TRAIN_ON = 420790
+NUMBER_OF_SAMPLE_TO_TRAIN_ON = 40000
 NUMBER_OF_RNN_LAYERS = 2
-RNN_COUNT = 256
+RNN_COUNT = 16
 BATCH_SIZE = 32
 VALIDATION_PORTION = 0.1
 MAX_PHONETICS_LEN = 30
-MIN_PHONETICS_LEN = 3
+MIN_PHONETICS_LEN = 1
 FEATURE_FOLDER_NAME = 'mfcc_balanced'
 ONE_TO_ONE_DATA_SET_PATH = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/oto_ds.txt'
 ONE_TO_ONE_ALPHABET_PATH = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/oto_alphabet.txt'
@@ -211,7 +211,7 @@ class VisualizationCallback(keras.callbacks.Callback):
                 edit_dist = editdistance.eval(decoded_res[j], word_batch['samples_in_batch'][j].phonetics)
                 mean_ed += float(edit_dist)
                 mean_ed_sq += (float(edit_dist) * float(edit_dist))
-                mean_norm_ed += float(edit_dist) / len(word_batch['samples_in_batch'][j].phonetics)
+                mean_norm_ed += float(edit_dist) / max(len(word_batch['samples_in_batch'][j].phonetics), 1)
                 count += 1
 
                 phonetics = word_batch['samples_in_batch'][j].phonetics + '      [' + str(
@@ -325,7 +325,7 @@ def create_one_to_one_dataset():
                 data = np.load(path)
                 label_length = len(static_get_phonetics_char_array(entry.phonetics))
 
-                if (data.shape[0] - NUMBER_OF_RNN_LAYERS > label_length) \
+                if (data.shape[0] > label_length) \
                         and (label_length > 0) \
                         and (label_length > MIN_PHONETICS_LEN) \
                         and (data.shape[0] > NUMBER_OF_RNN_LAYERS):
@@ -381,7 +381,10 @@ def load_entries_for_training():
     with open(ONE_TO_ONE_DATA_SET_PATH) as file:
         line = file.readline()
         while line:
-            entries.append(TrainingEntry(line=line))
+            entry = TrainingEntry(line=line)
+            ll = len(static_get_phonetics_char_array(entry.phonetics))
+            if (ll >= MIN_PHONETICS_LEN) and (ll <= MAX_PHONETICS_LEN):
+                entries.append(entry)
             line = file.readline()
 
     null_count = NUMBER_OF_SAMPLE_TO_TRAIN_ON // 100
@@ -409,16 +412,32 @@ def load_entries_for_training():
 
 def load_training_data_into_memory(dataset):
     print('Loading dataset in memory')
+    result = []
+    count = 0
+
     for i, entry in enumerate(dataset):
         if i % 1000 == 0 and i > 0:
-            print(f'   -> {i} of {len(dataset)}')
+            print(f'   -> {i} of {len(dataset)} [dropped: {count}]')
 
+        data = None
         if entry.data_path is not None:
-            entry.data = np.load(entry.data_path)
+            data = np.load(entry.data_path)
             entry.label = text_to_labels(static_get_phonetics_char_array(entry.phonetics))
+        else:
+            continue
 
+        if len(entry.label) * (POOL_SIZE ** CONV_LAYERS_COUNT) < data.shape[0]:
+            entry.data = data
+            result.append(entry)
+        else:
+            # print(f'   -> Dropped sample {entry.data.shape} -> {len(entry.label)}')
+            count += 1
+
+    print(f'   -> Total sample dropped: {count}')
     print('   -> Done')
     print('')
+
+    return result
 
 
 def load_alphabet_indices():
@@ -529,7 +548,7 @@ def create_model():
                        activation=act, kernel_initializer='he_normal',
                        name='conv' + str(i + 2))(inner)
 
-        inner = MaxPooling2D(pool_size=(pool_size, pool_size), name='max' + str(i+2))(inner)
+        inner = MaxPooling2D(pool_size=(pool_size, pool_size), name='max' + str(i + 2))(inner)
 
     time_steps = PADDED_FEATURE_SHAPE_INPUT[0]
     conv_to_rnn_dims = (time_steps // (pool_size ** CONV_LAYERS_COUNT),
@@ -542,12 +561,12 @@ def create_model():
 
     # Two layers of bidirectional GRUs
     # GRU seems to work as well, if not better than LSTM:
-    gru_1 = LSTM(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(inner)
-    gru_1b = LSTM(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
+    gru_1 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(inner)
+    gru_1b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
         inner)
     gru1_merged = add([gru_1, gru_1b])
-    gru_2 = LSTM(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
-    gru_2b = LSTM(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
+    gru_2 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
+    gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
         gru1_merged)
 
     # transforms RNN output to character activations:
@@ -586,7 +605,7 @@ def main():
     dataset, ALPHABET = load_entries_for_training()
     load_alphabet_indices()
 
-    load_training_data_into_memory(dataset)
+    dataset = load_training_data_into_memory(dataset)
 
     try_training_model(dataset)
     print('Done training!')

@@ -7,6 +7,8 @@ def static_get_phonetics_char_array(phonetics):
     result = []
     prefix = ''
 
+    phonetics = phonetics.replace('ˌ', '')
+
     for ch in phonetics:
         if ch == 'ˌ':
             prefix = 'ˌ'

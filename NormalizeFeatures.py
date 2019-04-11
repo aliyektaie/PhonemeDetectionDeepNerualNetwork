@@ -1,7 +1,7 @@
 import os
 import numpy as np
 
-INPUT_FEATURE_FOLDER_NAME = 'mfcc2'
+INPUT_FEATURE_FOLDER_NAME = 'mfcc'
 OUTPUT_FEATURE_FOLDER_NAME = 'mfcc_balanced'
 FEATURE_FOLDER = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/Features/' \
                  + INPUT_FEATURE_FOLDER_NAME + '/'
@@ -31,37 +31,43 @@ def save_normalized_features(files, means, stds):
     print('Loading all features files')
     count = len(files)
     min_ts = 100
+    max_ts = 0
     tss = []
 
     for ind, file in enumerate(files):
-        if ind % 1000 == 0:
-            print('   -> Processed %.1f%s' % (ind * 100.0 / count, '%'))
+        try:
+            if ind % 1000 == 0:
+                print('   -> Processed %.1f%s' % (ind * 100.0 / count, '%'))
 
-        if not os.path.isfile(file):
+            if not os.path.isfile(file):
+                continue
+
+            data = np.load(file)
+
+            # if data.shape[0] < 125:
+            #     continue
+
+            min_ts = min(min_ts, data.shape[0])
+            max_ts = max(max_ts, data.shape[0])
+            tss.append(data.shape[0])
+            for i in range(means.shape[0]):
+                for j in range(means.shape[1]):
+                    data[:, i, j] -= means[i, j]
+                    if stds[i, j] != 0.:
+                        data[:, i, j] /= stds[i, j]
+
+            path = file.replace(INPUT_FEATURE_FOLDER_NAME, OUTPUT_FEATURE_FOLDER_NAME)
+            folder = path[0:path.rfind('/')]
+            if not os.path.isdir(folder):
+                os.mkdir(folder)
+
+            np.save(path, data)
+            # os.remove(file)
+        except:
             continue
-
-        data = np.load(file)
-
-        if data.shape[0] < 125:
-            continue
-
-        min_ts = min(min_ts, data.shape[0])
-        tss.append(data.shape[0])
-        for i in range(means.shape[0]):
-            for j in range(means.shape[1]):
-                data[:, i, j] -= means[i, j]
-                if stds[i, j] != 0.:
-                    data[:, i, j] /= stds[i, j]
-
-        path = file.replace(INPUT_FEATURE_FOLDER_NAME, OUTPUT_FEATURE_FOLDER_NAME)
-        folder = path[0:path.rfind('/')]
-        if not os.path.isdir(folder):
-            os.mkdir(folder)
-
-        np.save(path, data)
-        os.remove(file)
 
     print('Min time step: ' + str(min_ts))
+    print('Max time step: ' + str(max_ts))
     print('Time step (avg): ' + str(np.average(np.array(tss))))
     print('Time step (std): ' + str(np.std(np.array(tss))))
 
@@ -106,6 +112,10 @@ def load_features_mean_std(files, count):
 def main():
     files = load_all_files(FEATURE_FOLDER)
     means, stds = load_features_mean_std(files, 10000)
+
+    folder = FEATURE_FOLDER.replace(INPUT_FEATURE_FOLDER_NAME, OUTPUT_FEATURE_FOLDER_NAME)
+    np.save(folder + 'mean', means)
+    np.save(folder + 'std', stds)
 
     save_normalized_features(files, means, stds)
 
