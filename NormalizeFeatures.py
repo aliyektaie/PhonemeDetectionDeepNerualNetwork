@@ -1,7 +1,7 @@
 import os
 import numpy as np
 
-INPUT_FEATURE_FOLDER_NAME = 'mfcc'
+INPUT_FEATURE_FOLDER_NAME = 'mfcc2'
 OUTPUT_FEATURE_FOLDER_NAME = 'mfcc_balanced'
 FEATURE_FOLDER = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/Features/' \
                  + INPUT_FEATURE_FOLDER_NAME + '/'
@@ -62,7 +62,7 @@ def save_normalized_features(files, means, stds):
                 os.mkdir(folder)
 
             np.save(path, data)
-            # os.remove(file)
+            os.remove(file)
         except:
             continue
 

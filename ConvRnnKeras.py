@@ -18,18 +18,22 @@ from keras import backend as K
 import sys
 
 CONV_LAYERS_COUNT = 3
+USE_RNN_AT_ALL = True
 POOL_SIZE = 2
-PADDED_FEATURE_SHAPE_INPUT = (185, 20, 3)
+KEEP_SMALL_EXAMPLES = False
+PADDED_FEATURE_SHAPE_INPUT = (735, 20, 3)
 # NUMBER_OF_SAMPLE_TO_TRAIN_ON = 420790
-NUMBER_OF_SAMPLE_TO_TRAIN_ON = 40000
+# NUMBER_OF_SAMPLE_TO_TRAIN_ON = 00000
 NUMBER_OF_RNN_LAYERS = 2
-RNN_COUNT = 16
+RNN_COUNT = 20
 BATCH_SIZE = 32
-VALIDATION_PORTION = 0.1
+VALIDATION_PORTION = 0.2
 MAX_PHONETICS_LEN = 30
 MIN_PHONETICS_LEN = 1
 FEATURE_FOLDER_NAME = 'mfcc_balanced'
-ONE_TO_ONE_DATA_SET_PATH = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/oto_ds.txt'
+ONE_TO_ONE_DATA_SET_PATH_TRAIN = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/oto_ds.tr.txt'
+ONE_TO_ONE_DATA_SET_PATH_VAL = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/oto_ds.val.txt'
+ONE_TO_ONE_DATA_SET_PATH_TEST = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/oto_ds.ts.txt'
 ONE_TO_ONE_ALPHABET_PATH = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/oto_alphabet.txt'
 OUTPUT_DIR = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Output'
 
@@ -119,8 +123,8 @@ class TrainDataGenerator(keras.utils.Sequence):
                 if len(self.samples) == 0:
                     self.max_size += 1
 
-            print(f'On epoch end: Next epoch will train with {len(self.samples)} samples.' +
-                  f' Max label length: {self.max_size}')
+            do_print(f'On epoch end: Next epoch will train with {len(self.samples)} samples.' +
+                     f' Max label length: {self.max_size}')
 
         self.indexes = np.arange(len(self.samples))
         np.random.shuffle(self.indexes)
@@ -145,7 +149,11 @@ class TrainDataGenerator(keras.utils.Sequence):
         dimensions = np.zeros((self.batch_size, 1))
 
         for i, sample in enumerate(samples_in_batch):
-            dimensions[i, 0] = sample.data.shape[0] // (POOL_SIZE ** CONV_LAYERS_COUNT) - 2
+            l = sample.data.shape[0] // (POOL_SIZE ** CONV_LAYERS_COUNT)
+            # if l <= len(sample.label):
+            #     l = len(sample.label) + 1
+
+            dimensions[i, 0] = l
 
         return dimensions
 
@@ -225,11 +233,11 @@ class VisualizationCallback(keras.callbacks.Callback):
                 }
 
             num_left -= 1
-        mean_norm_ed = mean_norm_ed / count
-        mean_ed = mean_ed / count
-        st_dev = np.sqrt(mean_ed_sq / count + (mean_ed * mean_ed))
-        print('\nOut of %d samples:  Mean edit distance: %.3f +- %.3f Mean normalized edit distance: %0.3f'
-              % (count, mean_ed, st_dev, mean_norm_ed))
+        mean_norm_ed = mean_norm_ed / max(count, 1)
+        mean_ed = mean_ed / max(count, 1)
+        st_dev = np.sqrt(mean_ed_sq / max(count + (mean_ed * mean_ed), 1))
+        do_print('\nOut of %d samples:  Mean edit distance: %.3f +- %.3f Mean normalized edit distance: %0.3f'
+                 % (count, mean_ed, st_dev, mean_norm_ed))
         self.accuracy.append('%d,%.3f,%.3f' % (epoch, mean_ed, st_dev))
 
         return result
@@ -297,11 +305,18 @@ def labels_to_text(labels):
     return "".join(ret)
 
 
+def get_subset(all_entries, start, end):
+    start = int(len(all_entries) * start)
+    end = int(len(all_entries) * end)
+
+    return all_entries[start:end]
+
+
 def create_one_to_one_dataset():
-    if os.path.isfile(ONE_TO_ONE_DATA_SET_PATH):
+    if os.path.isfile(ONE_TO_ONE_DATA_SET_PATH_TRAIN):
         return
 
-    print('Creating one-to-one dataset')
+    do_print('Creating one-to-one dataset')
     ds = DataSet(Constants.TRAINING_FOLDER_PATH)
     all_entries = []
     dropped = 0
@@ -309,14 +324,20 @@ def create_one_to_one_dataset():
     min_label_length = 100
     zero_length_labels = 0
     short_length_labels = 0
+    invalid_symbols = [';', '+', '4', '5', '7', ' ']
 
     for index, entry in enumerate(ds.entries):
         if index % 1000 == 0:
-            print('   -> %d of %d' % (index, len(ds.entries)))
+            do_print('   -> %d of %d' % (index, len(ds.entries)))
 
         if entry.phonetics == '':
             zero_length_labels += 1
             continue
+
+        ph = static_get_phonetics_char_array(entry.phonetics)
+        for symbol in invalid_symbols:
+            if symbol in ph:
+                continue
 
         for i, path in enumerate(entry.get_audio_paths()):
             path = path.replace('Audio Files', 'Features/' + FEATURE_FOLDER_NAME).replace('.wav', '.npy')
@@ -340,54 +361,85 @@ def create_one_to_one_dataset():
 
                     all_entries.append(e)
                 elif data.shape[0] <= NUMBER_OF_RNN_LAYERS:
-                    print('   -> [INFO] Dropped sample because data is too short')
+                    do_print('   -> [INFO] Dropped sample because data is too short')
                 elif label_length == 0:
                     zero_length_labels += 1
-                    print('   -> [INFO] Dropped sample because label length is 0')
+                    do_print('   -> [INFO] Dropped sample because label length is 0')
                 elif label_length <= MIN_PHONETICS_LEN:
                     short_length_labels += 1
-                    # print('   -> [INFO] Dropped sample because label length is less than ' + str(MIN_PHONETICS_LEN))
+                    # do_print('   -> [INFO] Dropped sample because label length is less than ' + str(MIN_PHONETICS_LEN))
                 else:
-                    print('   -> [INFO] Dropped sample because label is longer than input')
+                    do_print('   -> [INFO] Dropped sample because label is longer than input')
                     dropped += 1
 
+    shuffle(all_entries)
+
     alphabet = set()
-    with open(ONE_TO_ONE_DATA_SET_PATH, 'w') as file:
-        for entry in all_entries:
+    create_alphabet_set(all_entries, alphabet)
+
+    with open(ONE_TO_ONE_DATA_SET_PATH_TRAIN, 'w') as file:
+        for entry in get_subset(all_entries, 0.0, 0.5):
             file.write(entry.to_str_line())
             file.write('\n')
 
-            symbols = static_get_phonetics_char_array(entry.phonetics)
-            for symbol in symbols:
-                if symbol not in alphabet:
-                    alphabet.add(symbol)
+    with open(ONE_TO_ONE_DATA_SET_PATH_VAL, 'w') as file:
+        for entry in get_subset(all_entries, 0.5, 0.7):
+            file.write(entry.to_str_line())
+            file.write('\n')
 
+    with open(ONE_TO_ONE_DATA_SET_PATH_TEST, 'w') as file:
+        for entry in get_subset(all_entries, 0.7, 1.0):
+            file.write(entry.to_str_line())
+            file.write('\n')
+
+    save_alphabet_file(alphabet)
+
+    do_print('   -> Total sample dropped: ' + str(dropped))
+    do_print('   -> Total sample missing label: ' + str(zero_length_labels))
+    do_print('   -> Total sample with too short label: ' + str(short_length_labels))
+    do_print('   -> Max label length: ' + str(max_label_length))
+    do_print('   -> Min label length: ' + str(min_label_length))
+    do_print('   -> Done')
+    do_print('')
+
+
+def create_alphabet_set(all_entries, alphabet):
+    for entry in all_entries:
+        symbols = static_get_phonetics_char_array(entry.phonetics)
+        for symbol in symbols:
+            if symbol not in alphabet:
+                alphabet.add(symbol)
+
+
+def save_alphabet_file(alphabet):
     with open(ONE_TO_ONE_ALPHABET_PATH, 'w') as file:
         file.write('\t'.join(list(alphabet)))
 
-    print('   -> Total sample dropped: ' + str(dropped))
-    print('   -> Total sample missing label: ' + str(zero_length_labels))
-    print('   -> Total sample with too short label: ' + str(short_length_labels))
-    print('   -> Max label length: ' + str(max_label_length))
-    print('   -> Min label length: ' + str(min_label_length))
-    print('   -> Done')
-    print('')
-
 
 def load_entries_for_training():
-    print('Loading training entries')
-    entries = []
+    do_print('Loading training entries')
+    entries_train = []
+    entries_val = []
 
-    with open(ONE_TO_ONE_DATA_SET_PATH) as file:
+    with open(ONE_TO_ONE_DATA_SET_PATH_TRAIN) as file:
         line = file.readline()
         while line:
             entry = TrainingEntry(line=line)
             ll = len(static_get_phonetics_char_array(entry.phonetics))
             if (ll >= MIN_PHONETICS_LEN) and (ll <= MAX_PHONETICS_LEN):
-                entries.append(entry)
+                entries_train.append(entry)
             line = file.readline()
 
-    null_count = NUMBER_OF_SAMPLE_TO_TRAIN_ON // 100
+    with open(ONE_TO_ONE_DATA_SET_PATH_VAL) as file:
+        line = file.readline()
+        while line:
+            entry = TrainingEntry(line=line)
+            ll = len(static_get_phonetics_char_array(entry.phonetics))
+            if (ll >= MIN_PHONETICS_LEN) and (ll <= MAX_PHONETICS_LEN):
+                entries_val.append(entry)
+            line = file.readline()
+
+    null_count = len(entries_train) // 100
     for i in range(null_count):
         e = TrainingEntry()
         e.label = [len(ALPHABET), len(ALPHABET), len(ALPHABET)]
@@ -396,48 +448,53 @@ def load_entries_for_training():
         e.data = np.zeros(PADDED_FEATURE_SHAPE_INPUT)
         e.word = ''
 
-        entries.append(e)
+        entries_train.append(e)
 
-    shuffle(entries)
+    shuffle(entries_train)
 
     alphabet = None
     with open(ONE_TO_ONE_ALPHABET_PATH) as file:
         alphabet = file.readline().split('\t')
 
-    print('   -> Done')
-    print('')
+    do_print('   -> Done')
+    do_print('')
 
-    return entries[0:min(NUMBER_OF_SAMPLE_TO_TRAIN_ON + null_count, len(entries))], alphabet
+    return entries_train, entries_val, alphabet
 
 
 def load_training_data_into_memory(dataset):
-    print('Loading dataset in memory')
+    do_print('Loading dataset in memory')
     result = []
     count = 0
 
     for i, entry in enumerate(dataset):
         if i % 1000 == 0 and i > 0:
-            print(f'   -> {i} of {len(dataset)} [dropped: {count}]')
+            do_print(f'   -> {i} of {len(dataset)} [dropped: {count}]')
 
         data = None
         if entry.data_path is not None:
             data = np.load(entry.data_path)
             entry.label = text_to_labels(static_get_phonetics_char_array(entry.phonetics))
         else:
-            continue
+            data = np.zeros(PADDED_FEATURE_SHAPE_INPUT)
+            entry.label = entry.label
 
-        if len(entry.label) * (POOL_SIZE ** CONV_LAYERS_COUNT) < data.shape[0]:
+        if KEEP_SMALL_EXAMPLES or len(entry.label) * (POOL_SIZE ** CONV_LAYERS_COUNT) < data.shape[0]:
             entry.data = data
             result.append(entry)
         else:
-            # print(f'   -> Dropped sample {entry.data.shape} -> {len(entry.label)}')
+            # do_print(f'   -> Dropped sample {entry.data.shape} -> {len(entry.label)}')
             count += 1
 
-    print(f'   -> Total sample dropped: {count}')
-    print('   -> Done')
-    print('')
+    do_print(f'   -> Total sample dropped: {count}')
+    do_print('   -> Done')
+    do_print('')
 
     return result
+
+
+def do_print(s):
+    print(s, flush=True)
 
 
 def load_alphabet_indices():
@@ -446,14 +503,6 @@ def load_alphabet_indices():
 
     ALPHABET_CHAR_TO_INDEX = {ch: i for i, ch in enumerate(ALPHABET)}
     ALPHABET_INDEX_TO_CHAR = {i: ch for i, ch in enumerate(ALPHABET)}
-
-
-def split_dataset_into_train_and_validation(dataset):
-    split_index = int(len(dataset) * (1.0 - VALIDATION_PORTION))
-    train = dataset[0:split_index]
-    validation = dataset[split_index:]
-
-    return train, validation
 
 
 def get_network_output_size():
@@ -559,20 +608,23 @@ def create_model():
     # cuts down input size going into RNN:
     inner = Dense(time_dense_size, activation=act, name='dense1')(inner)
 
-    # Two layers of bidirectional GRUs
-    # GRU seems to work as well, if not better than LSTM:
-    gru_1 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(inner)
-    gru_1b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
-        inner)
-    gru1_merged = add([gru_1, gru_1b])
-    gru_2 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
-    gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
-        gru1_merged)
+    if USE_RNN_AT_ALL:
+        # Two layers of bidirectional GRUs
+        # GRU seems to work as well, if not better than LSTM:
+        gru_1 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(inner)
+        gru_1b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
+            inner)
+        gru1_merged = add([gru_1, gru_1b])
+        gru_2 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
+        gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
+            gru1_merged)
+
+        inner = concatenate([gru_2, gru_2b])
 
     # transforms RNN output to character activations:
     inner = Dense(get_network_output_size(),
                   kernel_initializer='he_normal',
-                  name='dense2')(concatenate([gru_2, gru_2b]))
+                  name='dense2')(inner)
 
     y_pred = Activation('softmax', name='softmax')(inner)
     Model(inputs=input_data, outputs=y_pred).summary()
@@ -602,20 +654,21 @@ def main():
     global ALPHABET
 
     create_one_to_one_dataset()
-    dataset, ALPHABET = load_entries_for_training()
+    dataset_train, dataset_val, ALPHABET = load_entries_for_training()
+    do_print('len alphabet: ' + str(len(ALPHABET)))
     load_alphabet_indices()
 
-    dataset = load_training_data_into_memory(dataset)
+    dataset_train = load_training_data_into_memory(dataset_train)
+    dataset_val = load_training_data_into_memory(dataset_val)
 
-    try_training_model(dataset)
-    print('Done training!')
+    try_training_model(dataset_train, dataset_val)
+    do_print('Done training!')
 
 
-def try_training_model(dataset):
+def try_training_model(train_entries, validation_entries):
     keras.regularizers.l1_l2(l1=0.01, l2=0.01)
 
     model, test_func = create_model()
-    train_entries, validation_entries = split_dataset_into_train_and_validation(dataset)
     run_name = 'first run'
     train_gen = TrainDataGenerator(train_entries, MAX_PHONETICS_LEN, PADDED_FEATURE_SHAPE_INPUT, BATCH_SIZE)
     validation_gen = TrainDataGenerator(validation_entries, MAX_PHONETICS_LEN, PADDED_FEATURE_SHAPE_INPUT, BATCH_SIZE)
@@ -626,7 +679,7 @@ def try_training_model(dataset):
                         validation_data=validation_gen,
                         callbacks=[viz_cb, train_gen],
                         steps_per_epoch=None,
-                        epochs=20)
+                        epochs=100)
     # except:
     #     result = False
 

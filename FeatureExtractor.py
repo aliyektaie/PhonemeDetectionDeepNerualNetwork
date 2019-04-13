@@ -141,8 +141,8 @@ def extract_mfcc_alternative_features(input_file, output_file, feature_shapes):
     mfccs = mfcc(audio,
                  Constants.AUDIO_FILES_SAMPLING_RATE,
                  numcep=Constants.MFCC_COEFFICIENT_COUNT,
-                 winlen=0.010,
-                 winstep=0.010).T
+                 winlen=0.008,
+                 winstep=0.008).T
 
     delta_added = add_delta_features_to_mfcc(mfccs)
     numpy.save(output_file, delta_added)
