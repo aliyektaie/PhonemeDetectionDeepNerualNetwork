@@ -17,15 +17,15 @@ from keras.backend.common import epsilon
 from keras import backend as K
 import sys
 
-CONV_LAYERS_COUNT = 3
+CONV_LAYERS_COUNT = 2
 USE_RNN_AT_ALL = True
-POOL_SIZE = 2
+POOL_SIZE = 3
 KEEP_SMALL_EXAMPLES = False
 PADDED_FEATURE_SHAPE_INPUT = (735, 20, 3)
 # NUMBER_OF_SAMPLE_TO_TRAIN_ON = 420790
-# NUMBER_OF_SAMPLE_TO_TRAIN_ON = 00000
+NUMBER_OF_SAMPLE_TO_TRAIN_ON = 10000
 NUMBER_OF_RNN_LAYERS = 2
-RNN_COUNT = 20
+RNN_COUNT = 256
 BATCH_SIZE = 32
 VALIDATION_PORTION = 0.2
 MAX_PHONETICS_LEN = 30
@@ -609,17 +609,21 @@ def create_model():
     inner = Dense(time_dense_size, activation=act, name='dense1')(inner)
 
     if USE_RNN_AT_ALL:
-        # Two layers of bidirectional GRUs
-        # GRU seems to work as well, if not better than LSTM:
-        gru_1 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(inner)
-        gru_1b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
-            inner)
-        gru1_merged = add([gru_1, gru_1b])
-        gru_2 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
-        gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
-            gru1_merged)
+        # Two layers of LSTMs
+        inner = GRU(rnn_size, return_sequences=True, name='lstm_1', kernel_initializer='he_normal')(inner)
+        inner = GRU(rnn_size, return_sequences=True, name='lstm_2', kernel_initializer='he_normal')(inner)
 
-        inner = concatenate([gru_2, gru_2b])
+        # # Two layers of bidirectional GRUs
+        # # GRU seems to work as well, if not better than LSTM:
+        # gru_1 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(inner)
+        # gru_1b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
+        #     inner)
+        # gru1_merged = add([gru_1, gru_1b])
+        # gru_2 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
+        # gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
+        #     gru1_merged)
+        #
+        # inner = concatenate([gru_2, gru_2b])
 
     # transforms RNN output to character activations:
     inner = Dense(get_network_output_size(),
@@ -637,17 +641,29 @@ def create_model():
     loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc')([y_pred, labels, input_length, label_length])
 
     # clipnorm seems to speeds up convergence
-    sgd = SGD(lr=0.02, decay=1e-5, momentum=0.5, nesterov=True, clipnorm=5)
+    # optimizer = SGD(lr=0.02, decay=1e-5, momentum=0.5, nesterov=True, clipnorm=5)
+    optimizer = 'adam'
 
     model = Model(inputs=[input_data, labels, input_length, label_length], outputs=loss_out)
 
     # the loss calc occurs elsewhere, so use a dummy lambda func for the loss
-    model.compile(loss={'ctc': lambda y_true, y_pred: y_pred}, optimizer=sgd, metrics=['acc'])
+    model.compile(loss={'ctc': lambda y_true, y_pred: y_pred}, optimizer=optimizer, metrics=['acc'])
 
     # captures output of softmax so we can decode the output during visualization
     test_func = K.function([input_data], [y_pred])
 
     return model, test_func
+
+
+def print_phonetics_length_distribution(dataset_val):
+    hist = np.zeros(MAX_PHONETICS_LEN+1)
+
+    for entry in dataset_val:
+        hist[len(static_get_phonetics_char_array(entry.phonetics))] += 1
+
+    print('Dataset Phonetics Length Distribution')
+    for i, count in enumerate(hist):
+        print(f'{i},{count}')
 
 
 def main():
@@ -657,6 +673,10 @@ def main():
     dataset_train, dataset_val, ALPHABET = load_entries_for_training()
     do_print('len alphabet: ' + str(len(ALPHABET)))
     load_alphabet_indices()
+    print_phonetics_length_distribution(dataset_val)
+
+    # dataset_train = dataset_train[0:NUMBER_OF_SAMPLE_TO_TRAIN_ON]
+    # dataset_val = dataset_val[0:500]
 
     dataset_train = load_training_data_into_memory(dataset_train)
     dataset_val = load_training_data_into_memory(dataset_val)
