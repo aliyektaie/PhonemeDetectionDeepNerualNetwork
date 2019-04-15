@@ -2,7 +2,8 @@ import editdistance
 import itertools
 
 from keras import Input, Model
-from keras.layers import Conv2D, MaxPooling2D, Reshape, Dense, GRU, add, Activation, concatenate, Lambda, LSTM
+from keras.layers import Conv2D, MaxPooling2D, Reshape, Dense, GRU, add, Activation, concatenate, Lambda, LSTM, \
+    Bidirectional, Dropout
 from keras.optimizers import SGD
 import matplotlib.pyplot as plt
 
@@ -17,15 +18,15 @@ from keras.backend.common import epsilon
 from keras import backend as K
 import sys
 
-CONV_LAYERS_COUNT = 2
+CONV_LAYERS_COUNT = 3
 USE_RNN_AT_ALL = True
-POOL_SIZE = 3
+POOL_SIZE = 2
 KEEP_SMALL_EXAMPLES = False
-PADDED_FEATURE_SHAPE_INPUT = (735, 20, 3)
+PADDED_FEATURE_SHAPE_INPUT = (460, 20, 3)
 # NUMBER_OF_SAMPLE_TO_TRAIN_ON = 420790
 NUMBER_OF_SAMPLE_TO_TRAIN_ON = 10000
 NUMBER_OF_RNN_LAYERS = 2
-RNN_COUNT = 256
+RNN_COUNT = 512
 BATCH_SIZE = 32
 VALIDATION_PORTION = 0.2
 MAX_PHONETICS_LEN = 30
@@ -210,13 +211,20 @@ class VisualizationCallback(keras.callbacks.Callback):
         mean_ed = 0.0
         mean_ed_sq = 0.0
         count = 0
+        iter = 0
+
+        do_print('Calculating edit distance of validation set')
         while num_left > 0:
+            iter += 1
+            do_print(f'   -> {iter} of {len(self.data_gen)}')
             word_batch, _ = self.data_gen[num_left - 1]
             inputs = word_batch[NETWORK_INPUT_LAYER]
             shape = inputs.shape
             decoded_res = decode_batch(self.test_func, word_batch)
             for j in range(shape[0]):
-                edit_dist = editdistance.eval(decoded_res[j], word_batch['samples_in_batch'][j].phonetics)
+                ph = word_batch['samples_in_batch'][j].phonetics
+                ph = ''.join(static_get_phonetics_char_array(ph))
+                edit_dist = editdistance.eval(decoded_res[j], ph)
                 mean_ed += float(edit_dist)
                 mean_ed_sq += (float(edit_dist) * float(edit_dist))
                 mean_norm_ed += float(edit_dist) / max(len(word_batch['samples_in_batch'][j].phonetics), 1)
@@ -240,6 +248,7 @@ class VisualizationCallback(keras.callbacks.Callback):
                  % (count, mean_ed, st_dev, mean_norm_ed))
         self.accuracy.append('%d,%.3f,%.3f' % (epoch, mean_ed, st_dev))
 
+        do_print('')
         return result
 
     def on_epoch_end(self, epoch=0, logs={}):
@@ -378,17 +387,17 @@ def create_one_to_one_dataset():
     create_alphabet_set(all_entries, alphabet)
 
     with open(ONE_TO_ONE_DATA_SET_PATH_TRAIN, 'w') as file:
-        for entry in get_subset(all_entries, 0.0, 0.5):
+        for entry in get_subset(all_entries, 0.0, 0.8):
             file.write(entry.to_str_line())
             file.write('\n')
 
     with open(ONE_TO_ONE_DATA_SET_PATH_VAL, 'w') as file:
-        for entry in get_subset(all_entries, 0.5, 0.7):
+        for entry in get_subset(all_entries, 0.8, 0.9):
             file.write(entry.to_str_line())
             file.write('\n')
 
     with open(ONE_TO_ONE_DATA_SET_PATH_TEST, 'w') as file:
-        for entry in get_subset(all_entries, 0.7, 1.0):
+        for entry in get_subset(all_entries, 0.9, 1.0):
             file.write(entry.to_str_line())
             file.write('\n')
 
@@ -610,8 +619,10 @@ def create_model():
 
     if USE_RNN_AT_ALL:
         # Two layers of LSTMs
-        inner = GRU(rnn_size, return_sequences=True, name='lstm_1', kernel_initializer='he_normal')(inner)
-        inner = GRU(rnn_size, return_sequences=True, name='lstm_2', kernel_initializer='he_normal')(inner)
+        inner = Bidirectional(LSTM(rnn_size, return_sequences=True, name='lstm_1', kernel_initializer='he_normal'))(inner)
+        inner = Dropout(rate=0.5)(inner)
+        inner = Bidirectional(LSTM(rnn_size, return_sequences=True, name='lstm_2', kernel_initializer='he_normal'))(inner)
+        inner = Dropout(rate=0.5)(inner)
 
         # # Two layers of bidirectional GRUs
         # # GRU seems to work as well, if not better than LSTM:
@@ -626,9 +637,8 @@ def create_model():
         # inner = concatenate([gru_2, gru_2b])
 
     # transforms RNN output to character activations:
-    inner = Dense(get_network_output_size(),
-                  kernel_initializer='he_normal',
-                  name='dense2')(inner)
+    # inner = Dense(200, kernel_initializer='he_normal', name='dense_t')(inner)
+    inner = Dense(get_network_output_size(), kernel_initializer='he_normal', name='dense2')(inner)
 
     y_pred = Activation('softmax', name='softmax')(inner)
     Model(inputs=input_data, outputs=y_pred).summary()
@@ -661,9 +671,9 @@ def print_phonetics_length_distribution(dataset_val):
     for entry in dataset_val:
         hist[len(static_get_phonetics_char_array(entry.phonetics))] += 1
 
-    print('Dataset Phonetics Length Distribution')
+    do_print('Dataset Phonetics Length Distribution')
     for i, count in enumerate(hist):
-        print(f'{i},{count}')
+        do_print(f'{i},{count}')
 
 
 def main():
