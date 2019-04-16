@@ -16,6 +16,7 @@ import tensorflow as tf
 from keras.backend.tensorflow_backend import ctc_label_dense_to_sparse
 from keras.backend.common import epsilon
 from keras import backend as K
+from keras.regularizers import l1_l2
 import sys
 
 CONV_LAYERS_COUNT = 3
@@ -26,7 +27,10 @@ PADDED_FEATURE_SHAPE_INPUT = (460, 20, 3)
 # NUMBER_OF_SAMPLE_TO_TRAIN_ON = 420790
 NUMBER_OF_SAMPLE_TO_TRAIN_ON = 10000
 NUMBER_OF_RNN_LAYERS = 2
-RNN_COUNT = 512
+# RNN_COUNT = [600, 400]
+RNN_COUNT = [256, 256]
+EPOCHS = 100
+DROPOUT_RATE = 0.5
 BATCH_SIZE = 32
 VALIDATION_PORTION = 0.2
 MAX_PHONETICS_LEN = 30
@@ -588,7 +592,6 @@ def create_model():
     kernel_2d_size = (3, 3)
     pool_size = POOL_SIZE
     time_dense_size = 64
-    rnn_size = RNN_COUNT
 
     act = 'relu'
     input_data = Input(name=NETWORK_INPUT_LAYER,
@@ -615,30 +618,24 @@ def create_model():
     inner = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(inner)
 
     # cuts down input size going into RNN:
-    inner = Dense(time_dense_size, activation=act, name='dense1')(inner)
+    inner = Dense(time_dense_size, activation=act, name='dense1', activity_regularizer=l1_l2(0.01, 0.01))(inner)
 
     if USE_RNN_AT_ALL:
-        # Two layers of LSTMs
-        inner = Bidirectional(LSTM(rnn_size, return_sequences=True, name='lstm_1', kernel_initializer='he_normal'))(inner)
-        inner = Dropout(rate=0.5)(inner)
-        inner = Bidirectional(LSTM(rnn_size, return_sequences=True, name='lstm_2', kernel_initializer='he_normal'))(inner)
-        inner = Dropout(rate=0.5)(inner)
+        # N layers of LSTMs
+        for i, size in enumerate(RNN_COUNT):
+            if DROPOUT_RATE is not None:
+                inner = Bidirectional(GRU(size, return_sequences=True, name='lstm_' + str(i + 1),
+                                          kernel_initializer='he_normal', recurrent_dropout=DROPOUT_RATE,
+                                          activity_regularizer=l1_l2(0.01, 0.01)))(inner)
+                inner = Dropout(rate=DROPOUT_RATE)(inner)
+            else:
+                inner = Bidirectional(GRU(size, return_sequences=True, name='lstm_' + str(i + 1), kernel_initializer='he_normal'))(inner)
 
-        # # Two layers of bidirectional GRUs
-        # # GRU seems to work as well, if not better than LSTM:
-        # gru_1 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru1')(inner)
-        # gru_1b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru1_b')(
-        #     inner)
-        # gru1_merged = add([gru_1, gru_1b])
-        # gru_2 = GRU(rnn_size, return_sequences=True, kernel_initializer='he_normal', name='gru2')(gru1_merged)
-        # gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True, kernel_initializer='he_normal', name='gru2_b')(
-        #     gru1_merged)
-        #
-        # inner = concatenate([gru_2, gru_2b])
 
     # transforms RNN output to character activations:
     # inner = Dense(200, kernel_initializer='he_normal', name='dense_t')(inner)
-    inner = Dense(get_network_output_size(), kernel_initializer='he_normal', name='dense2')(inner)
+    inner = Dense(get_network_output_size(), kernel_initializer='he_normal', name='dense2',
+                  activity_regularizer=l1_l2(0.01, 0.01))(inner)
 
     y_pred = Activation('softmax', name='softmax')(inner)
     Model(inputs=input_data, outputs=y_pred).summary()
@@ -685,8 +682,8 @@ def main():
     load_alphabet_indices()
     print_phonetics_length_distribution(dataset_val)
 
-    # dataset_train = dataset_train[0:NUMBER_OF_SAMPLE_TO_TRAIN_ON]
-    # dataset_val = dataset_val[0:500]
+    # dataset_train = dataset_train[0:5000]
+    # dataset_val = dataset_train[0:200]
 
     dataset_train = load_training_data_into_memory(dataset_train)
     dataset_val = load_training_data_into_memory(dataset_val)
@@ -709,7 +706,7 @@ def try_training_model(train_entries, validation_entries):
                         validation_data=validation_gen,
                         callbacks=[viz_cb, train_gen],
                         steps_per_epoch=None,
-                        epochs=100)
+                        epochs=EPOCHS)
     # except:
     #     result = False
 
