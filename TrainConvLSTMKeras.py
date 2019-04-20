@@ -673,8 +673,12 @@ def print_phonetics_length_distribution(dataset_val):
         do_print(f'{i},{count}')
 
 
-def main():
+def main(epochs=None):
     global ALPHABET
+    global EPOCHS
+
+    if epochs is not None:
+        EPOCHS = epochs
 
     create_one_to_one_dataset()
     dataset_train, dataset_val, ALPHABET = load_entries_for_training()

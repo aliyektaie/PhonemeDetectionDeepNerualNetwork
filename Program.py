@@ -6,6 +6,7 @@ import FeatureExtractor
 import numpy as np
 from matplotlib import pyplot as plt
 import NormalizeFeatures
+import TrainConvLSTMKeras
 
 
 def init_arguments():
@@ -16,6 +17,10 @@ def init_arguments():
     parser.add_argument('--normalize-feature', metavar='normalize', type=str, nargs=1, dest='normalize',
                         help='Normalize features of training set. This normalization scales features to z score.' +
                              ' The parameter defines the feature input folder.')
+
+    parser.add_argument('--train', metavar='train', type=int, nargs=1, dest='train',
+                        help='Train a model based on Conv2D, LSTM and CTC loss function. The parameter specify the ' +
+                             'number of epochs')
 
     return parser.parse_args()
 
@@ -148,6 +153,9 @@ def main():
     elif args.normalize:
         # normalize_features(args.normalize)
         print('Normalizing Features')
+    elif args.train:
+        # TrainConvLSTMKeras.main(args.train[0])
+        print(f'Train {args.train[0]} epochs')
 
 
 if __name__ == '__main__':
