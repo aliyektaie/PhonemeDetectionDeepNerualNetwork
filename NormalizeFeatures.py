@@ -96,7 +96,7 @@ def load_features_mean_std(files, count):
     start = 0
 
     for data in concatinated:
-        all[start:start+data.shape[0],:,:] = data
+        all[start:start + data.shape[0], :, :] = data
         start += data.shape[0]
 
     concatinated = all
@@ -110,7 +110,11 @@ def load_features_mean_std(files, count):
     return means, stds
 
 
-def main():
+def main(featureFolder=None):
+    global FEATURE_FOLDER
+    if featureFolder is not None:
+        FEATURE_FOLDER = featureFolder
+
     files = load_all_files(FEATURE_FOLDER)
     means, stds = load_features_mean_std(files, 10000)
 

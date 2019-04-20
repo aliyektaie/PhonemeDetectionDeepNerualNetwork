@@ -5,6 +5,7 @@ from DataSet import DataSet
 import FeatureExtractor
 import numpy as np
 from matplotlib import pyplot as plt
+import NormalizeFeatures
 
 
 def init_arguments():
@@ -12,6 +13,9 @@ def init_arguments():
     parser.add_argument('--extract-feature', metavar='method', type=str, nargs=1, dest='method',
                         help='Extract features of training set. The feature extraction method must be specified.'
                              ' \'method\' include: mfcc')
+    parser.add_argument('--normalize-feature', metavar='normalize', type=str, nargs=1, dest='normalize',
+                        help='Normalize features of training set. This normalization scales features to z score.' +
+                             ' The parameter defines the feature input folder.')
 
     return parser.parse_args()
 
@@ -131,11 +135,19 @@ def save_feature_extraction_report(folder, histogram, max_shape, method, bins, m
     file.close()
 
 
+def normalize_features(features):
+    NormalizeFeatures.main(features[0])
+
+
 def main():
     args = init_arguments()
 
     if args.method:
-        extract_features(args.method)
+        # extract_features(args.method)
+        print('Extracting Features')
+    elif args.normalize:
+        # normalize_features(args.normalize)
+        print('Normalizing Features')
 
 
 if __name__ == '__main__':
