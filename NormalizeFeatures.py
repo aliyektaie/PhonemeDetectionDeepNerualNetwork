@@ -1,9 +1,10 @@
 import os
 import numpy as np
+import Constants
 
 INPUT_FEATURE_FOLDER_NAME = 'mfcc2'
 OUTPUT_FEATURE_FOLDER_NAME = 'mfcc_balanced'
-FEATURE_FOLDER = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/Features/' \
+FEATURE_FOLDER = Constants.TRAINING_FOLDER_PATH + 'Features/' \
                  + INPUT_FEATURE_FOLDER_NAME + '/'
 
 

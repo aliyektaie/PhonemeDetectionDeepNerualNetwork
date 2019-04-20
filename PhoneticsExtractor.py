@@ -152,11 +152,11 @@ def save_sample(dataset, alphabet):
         index += f'{entry.word}\t{entry.phonetics}\t{entry.audioCount}\n'
         total += entry.audioCount
 
-    file = open("/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/index_sample.txt", "w")
+    file = open(Constants.TRAINING_FOLDER_PATH + "index_sample.txt", "w")
     file.write(index)
     file.close()
 
-    file = open("/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/alphabet_sample.txt", "w")
+    file = open(Constants.TRAINING_FOLDER_PATH + "alphabet_sample.txt", "w")
     file.write(',,'.join(alphabet))
     file.close()
 

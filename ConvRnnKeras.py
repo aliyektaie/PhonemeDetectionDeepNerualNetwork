@@ -2,11 +2,7 @@ import editdistance
 import itertools
 
 from keras import Input, Model
-from keras.layers import Conv2D, MaxPooling2D, Reshape, Dense, GRU, add, Activation, concatenate, Lambda, LSTM, \
-    Bidirectional, Dropout
-from keras.optimizers import SGD
-import matplotlib.pyplot as plt
-
+from keras.layers import Conv2D, MaxPooling2D, Reshape, Dense, Activation, Lambda, LSTM, Bidirectional, Dropout
 from DataSet import *
 import Constants
 from random import shuffle
@@ -17,30 +13,28 @@ from keras.backend.tensorflow_backend import ctc_label_dense_to_sparse
 from keras.backend.common import epsilon
 from keras import backend as K
 from keras.regularizers import l1_l2
-import sys
 
 CONV_LAYERS_COUNT = 3
 USE_RNN_AT_ALL = True
 POOL_SIZE = 2
 KEEP_SMALL_EXAMPLES = False
 PADDED_FEATURE_SHAPE_INPUT = (460, 20, 3)
-# NUMBER_OF_SAMPLE_TO_TRAIN_ON = 420790
-NUMBER_OF_SAMPLE_TO_TRAIN_ON = 10000
 NUMBER_OF_RNN_LAYERS = 2
-# RNN_COUNT = [600, 400]
-RNN_COUNT = [256, 256]
-EPOCHS = 100
-DROPOUT_RATE = 0.5
+RNN_COUNT = [1000, 500]
+EPOCHS = 1000
+DROPOUT_RATE = 0.7
+RECURRENT_DROPOUT_RATE = 0.03
 BATCH_SIZE = 32
 VALIDATION_PORTION = 0.2
 MAX_PHONETICS_LEN = 30
 MIN_PHONETICS_LEN = 1
+L_REGULARIZATION = 0.0
 FEATURE_FOLDER_NAME = 'mfcc_balanced'
-ONE_TO_ONE_DATA_SET_PATH_TRAIN = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/oto_ds.tr.txt'
-ONE_TO_ONE_DATA_SET_PATH_VAL = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/oto_ds.val.txt'
-ONE_TO_ONE_DATA_SET_PATH_TEST = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/oto_ds.ts.txt'
-ONE_TO_ONE_ALPHABET_PATH = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Data/DataSet/oto_alphabet.txt'
-OUTPUT_DIR = '/Volumes/Files/Georgetown/AdvancedMachineLearning/Project Output'
+ONE_TO_ONE_DATA_SET_PATH_TRAIN = Constants.TRAINING_FOLDER_PATH + 'oto_ds.tr.txt'
+ONE_TO_ONE_DATA_SET_PATH_VAL = Constants.TRAINING_FOLDER_PATH + 'oto_ds.val.txt'
+ONE_TO_ONE_DATA_SET_PATH_TEST = Constants.TRAINING_FOLDER_PATH + 'oto_ds.ts.txt'
+ONE_TO_ONE_ALPHABET_PATH = Constants.TRAINING_FOLDER_PATH + 'oto_alphabet.txt'
+OUTPUT_DIR = Constants.MODELS_OUTPUT_PATH
 
 ALPHABET_CHAR_TO_INDEX = {}
 ALPHABET_INDEX_TO_CHAR = {}
@@ -133,6 +127,8 @@ class TrainDataGenerator(keras.utils.Sequence):
 
         self.indexes = np.arange(len(self.samples))
         np.random.shuffle(self.indexes)
+        do_print('data shuffled')
+        do_print(str(self.indexes))
 
     def generate_inputs_X(self, samples_in_batch):
         X_data = np.zeros((self.batch_size, *self.input_shape))
@@ -206,7 +202,7 @@ class VisualizationCallback(keras.callbacks.Callback):
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 
-    def show_edit_distance(self, epoch):
+    def show_edit_distance(self, epoch, logs):
         result = {}
         num = len(self.data_gen)
 
@@ -250,14 +246,18 @@ class VisualizationCallback(keras.callbacks.Callback):
         st_dev = np.sqrt(mean_ed_sq / max(count + (mean_ed * mean_ed), 1))
         do_print('\nOut of %d samples:  Mean edit distance: %.3f +- %.3f Mean normalized edit distance: %0.3f'
                  % (count, mean_ed, st_dev, mean_norm_ed))
-        self.accuracy.append('%d,%.3f,%.3f' % (epoch, mean_ed, st_dev))
+        if len(self.accuracy) == 0:
+            self.accuracy.append(
+                'Epoch,Mean Edit Distance,Std Edit Distance,Normalized Edit Distance,Train Loss,Validation Loss')
+        self.accuracy.append('%d,%.3f,%.3f,%.3f,%.3f,%.3f' % (epoch + 1, mean_ed, st_dev, mean_norm_ed, logs['loss']
+                                                              , logs['val_loss']))
 
         do_print('')
         return result
 
     def on_epoch_end(self, epoch=0, logs={}):
         self.model.save_weights(os.path.join(self.output_dir, 'weights%02d.h5' % (epoch)))
-        self.epochs_result[epoch] = self.show_edit_distance(epoch)
+        self.epochs_result[epoch] = self.show_edit_distance(epoch, logs)
         self.save_results_as_csv(epoch)
 
     def save_results_as_csv(self, epoch):
@@ -583,7 +583,7 @@ def decode_batch(test_func, word_batch):
     return ret_1
 
 
-def create_model():
+def create_model(add_dropouts=True):
     # Input Parameters
     feature_count_per_entry = PADDED_FEATURE_SHAPE_INPUT[1]
 
@@ -618,24 +618,24 @@ def create_model():
     inner = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(inner)
 
     # cuts down input size going into RNN:
-    inner = Dense(time_dense_size, activation=act, name='dense1', activity_regularizer=l1_l2(0.01, 0.01))(inner)
+    inner = Dense(time_dense_size, activation=act, name='dense1',
+                  activity_regularizer=l1_l2(L_REGULARIZATION, L_REGULARIZATION))(inner)
 
     if USE_RNN_AT_ALL:
         # N layers of LSTMs
         for i, size in enumerate(RNN_COUNT):
-            if DROPOUT_RATE is not None:
-                inner = Bidirectional(GRU(size, return_sequences=True, name='lstm_' + str(i + 1),
-                                          kernel_initializer='he_normal', recurrent_dropout=DROPOUT_RATE,
-                                          activity_regularizer=l1_l2(0.01, 0.01)))(inner)
+            drr = RECURRENT_DROPOUT_RATE
+            if not add_dropouts:
+                drr = 0
+            inner = Bidirectional(LSTM(size, return_sequences=True, name='lstm_' + str(i + 1),
+                                       kernel_initializer='he_normal', recurrent_dropout=drr,
+                                       activity_regularizer=l1_l2(L_REGULARIZATION, L_REGULARIZATION)))(inner)
+            if add_dropouts:
                 inner = Dropout(rate=DROPOUT_RATE)(inner)
-            else:
-                inner = Bidirectional(GRU(size, return_sequences=True, name='lstm_' + str(i + 1), kernel_initializer='he_normal'))(inner)
-
 
     # transforms RNN output to character activations:
-    # inner = Dense(200, kernel_initializer='he_normal', name='dense_t')(inner)
     inner = Dense(get_network_output_size(), kernel_initializer='he_normal', name='dense2',
-                  activity_regularizer=l1_l2(0.01, 0.01))(inner)
+                  activity_regularizer=l1_l2(L_REGULARIZATION, L_REGULARIZATION))(inner)
 
     y_pred = Activation('softmax', name='softmax')(inner)
     Model(inputs=input_data, outputs=y_pred).summary()
@@ -663,7 +663,7 @@ def create_model():
 
 
 def print_phonetics_length_distribution(dataset_val):
-    hist = np.zeros(MAX_PHONETICS_LEN+1)
+    hist = np.zeros(MAX_PHONETICS_LEN + 1)
 
     for entry in dataset_val:
         hist[len(static_get_phonetics_char_array(entry.phonetics))] += 1
@@ -693,8 +693,6 @@ def main():
 
 
 def try_training_model(train_entries, validation_entries):
-    keras.regularizers.l1_l2(l1=0.01, l2=0.01)
-
     model, test_func = create_model()
     run_name = 'first run'
     train_gen = TrainDataGenerator(train_entries, MAX_PHONETICS_LEN, PADDED_FEATURE_SHAPE_INPUT, BATCH_SIZE)
@@ -707,8 +705,6 @@ def try_training_model(train_entries, validation_entries):
                         callbacks=[viz_cb, train_gen],
                         steps_per_epoch=None,
                         epochs=EPOCHS)
-    # except:
-    #     result = False
 
     return result
 
