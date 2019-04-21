@@ -51,11 +51,7 @@ def save_normalized_features(files, means, stds):
             min_ts = min(min_ts, data.shape[0])
             max_ts = max(max_ts, data.shape[0])
             tss.append(data.shape[0])
-            for i in range(means.shape[0]):
-                for j in range(means.shape[1]):
-                    data[:, i, j] -= means[i, j]
-                    if stds[i, j] != 0.:
-                        data[:, i, j] /= stds[i, j]
+            normalize_single_data(data, means, stds)
 
             path = file.replace(INPUT_FEATURE_FOLDER_NAME, OUTPUT_FEATURE_FOLDER_NAME)
             folder = path[0:path.rfind('/')]
@@ -71,6 +67,14 @@ def save_normalized_features(files, means, stds):
     print('Max time step: ' + str(max_ts))
     print('Time step (avg): ' + str(np.average(np.array(tss))))
     print('Time step (std): ' + str(np.std(np.array(tss))))
+
+
+def normalize_single_data(data, means, stds):
+    for i in range(means.shape[0]):
+        for j in range(means.shape[1]):
+            data[:, i, j] -= means[i, j]
+            if stds[i, j] != 0.:
+                data[:, i, j] /= stds[i, j]
 
 
 def load_features_mean_std(files, count):

@@ -465,14 +465,21 @@ def load_entries_for_training():
 
     shuffle(entries_train)
 
+    alphabet = load_alphabet()
+
+    return entries_train, entries_val, alphabet
+
+
+def load_alphabet(print_done=True):
     alphabet = None
     with open(ONE_TO_ONE_ALPHABET_PATH) as file:
         alphabet = file.readline().split('\t')
 
-    do_print('   -> Done')
-    do_print('')
+    if print_done:
+        do_print('   -> Done')
+        do_print('')
 
-    return entries_train, entries_val, alphabet
+    return alphabet
 
 
 def load_training_data_into_memory(dataset):
@@ -659,7 +666,7 @@ def create_model(add_dropouts=True):
     # captures output of softmax so we can decode the output during visualization
     test_func = K.function([input_data], [y_pred])
 
-    return model, test_func
+    return model, test_func, y_pred, input_data
 
 
 def print_phonetics_length_distribution(dataset_val):
@@ -673,7 +680,7 @@ def print_phonetics_length_distribution(dataset_val):
         do_print(f'{i},{count}')
 
 
-def main(epochs=None):
+def init(epochs):
     global ALPHABET
     global EPOCHS
 
@@ -684,6 +691,19 @@ def main(epochs=None):
     dataset_train, dataset_val, ALPHABET = load_entries_for_training()
     do_print('len alphabet: ' + str(len(ALPHABET)))
     load_alphabet_indices()
+
+    return dataset_train, dataset_val
+
+
+def init_predict():
+    global ALPHABET
+
+    ALPHABET = load_alphabet(False)
+    load_alphabet_indices()
+
+
+def main(epochs=None):
+    dataset_train, dataset_val = init(epochs)
     print_phonetics_length_distribution(dataset_val)
 
     # dataset_train = dataset_train[0:5000]
@@ -697,7 +717,7 @@ def main(epochs=None):
 
 
 def try_training_model(train_entries, validation_entries):
-    model, test_func = create_model()
+    model, test_func, _, _ = create_model()
     run_name = 'first run'
     train_gen = TrainDataGenerator(train_entries, MAX_PHONETICS_LEN, PADDED_FEATURE_SHAPE_INPUT, BATCH_SIZE)
     validation_gen = TrainDataGenerator(validation_entries, MAX_PHONETICS_LEN, PADDED_FEATURE_SHAPE_INPUT, BATCH_SIZE)
