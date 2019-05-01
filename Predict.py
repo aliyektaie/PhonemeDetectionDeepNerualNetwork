@@ -98,20 +98,22 @@ def create_distance_error():
 def plot_error_distance_in_predictions(distances, title):
     values = []
     counts = []
+    count = 0
 
     for i in range(0, 20 + 1):
         if distances[i] > 0:
             values.append(distances[i])
             counts.append(i)
+            count += distances[i]
 
     plt.figure(figsize=(7, 6), dpi=200)
     plt.bar(np.arange(len(counts)), values, align='center', color='green')
     plt.xticks(np.arange(len(counts)), counts)
     plt.ylabel('Frequency')
-    plt.title(f'Distance of Predicted to True Phonetics ({title})')
+    plt.title(f'Distance of Predicted to True Phonetics ({title}) - {count} Entries')
     plt.savefig(OUTPUT_FOLDER + title + '.png')
 
-    plt.show()
+    # plt.show()
 
 
 def add_to_confusion_matrix(confusion_matrix, opcodes, predicted, label):
@@ -145,46 +147,23 @@ def add_to_confusion_matrix(confusion_matrix, opcodes, predicted, label):
         except:
             pass
 
+
 # https://www.kaggle.com/grfiv4/plot-a-confusion-matrix
 def plot_confusion_matrix(cm,
                           title='Confusion matrix',
                           cmap=None,
                           normalize=False):
-    """
-    given a sklearn confusion matrix (cm), make a nice plot
-
-    Arguments
-    ---------
-    cm:           confusion matrix from sklearn.metrics.confusion_matrix
-
-    target_names: given classification classes such as [0, 1, 2]
-                  the class names, for example: ['high', 'medium', 'low']
-
-    title:        the text to display at the top of the matrix
-
-    cmap:         the gradient of the values displayed from matplotlib.pyplot.cm
-                  see http://matplotlib.org/examples/color/colormaps_reference.html
-                  plt.get_cmap('jet') or plt.cm.Blues
-
-    normalize:    If False, plot the raw numbers
-                  If True, plot the proportions
-
-    Usage
-    -----
-    plot_confusion_matrix(cm           = cm,                  # confusion matrix created by
-                                                              # sklearn.metrics.confusion_matrix
-                          normalize    = True,                # show proportions
-                          target_names = y_labels_vals,       # list of names of the classes
-                          title        = best_estimator_name) # title of graph
-
-    Citiation
-    ---------
-    http://scikit-learn.org/stable/auto_examples/model_selection/plot_confusion_matrix.html
-
-    """
     import matplotlib.pyplot as plt
     import numpy as np
     import itertools
+
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+
+    for ii in range(cm.shape[0]):
+        for jj in range(cm.shape[1]):
+            if np.isnan(cm[ii, jj]):
+                cm[ii, jj] = 0
 
     target_names = [c for c in TrainConvLSTMKeras.ALPHABET]
     target_names.append('r/d')
@@ -205,36 +184,28 @@ def plot_confusion_matrix(cm,
         plt.xticks(tick_marks, target_names, rotation=45)
         plt.yticks(tick_marks, target_names)
 
-    if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-
-    for ii in range(cm.shape[0]):
-        for jj in range(cm.shape[1]):
-            if np.isnan(cm[ii, jj]):
-                cm[ii, jj] = 0
-
     thresh = cm.max() / 1.5 if normalize else cm.max() / 2
     for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        if normalize:
-            plt.text(j, i, "{:0.4f}".format(cm[i, j]),
-                     horizontalalignment="center",
-                     color="white" if cm[i, j] > thresh else "black")
-        else:
-            plt.text(j, i, "{:,}".format(cm[i, j]),
-                     horizontalalignment="center",
-                     color="white" if cm[i, j] > thresh else "black")
+        if cm[i, j] > 0 or i == j:
+            if normalize:
+                plt.text(j, i, "{:0.4f}".format(cm[i, j]),
+                         horizontalalignment="center",
+                         color="white" if cm[i, j] > thresh else "black")
+            else:
+                plt.text(j, i, "{:,}".format(cm[i, j]),
+                         horizontalalignment="center",
+                         color="white" if cm[i, j] > thresh else "black")
 
     plt.tight_layout()
     plt.ylabel('True label')
     plt.xlabel('Predicted label\naccuracy={:0.4f}; misclass={:0.4f}'.format(accuracy, misclass))
     plt.savefig(OUTPUT_FOLDER + 'confusion matrix.png')
-    plt.show()
+    # plt.show()
 
 
 def main(file_path):
     print('Loading input file(s) list')
     file_paths = load_file_paths(file_path)
-    # file_paths = file_paths[0:50]
     print('Loading normalization scale')
     mean, std = load_scales()
 
@@ -285,16 +256,18 @@ def main(file_path):
         line = f'{entry.word},{phonetics},{r[0]},{ds[0]},{r[1]},{ds[1]},{r[2]},{ds[2]}'
         results.append(line)
 
-        if ii % 100 == 0:
+        if (ii + 1) % 100 == 0 and ii > 50:
             save_results(results, print_to_console=False)
 
     save_results(results, print_to_console=True)
+    save_chart_cm(confusion_matrix, distance_error_count)
 
+
+def save_chart_cm(confusion_matrix, distance_error_count):
     chart_titles = ['Best Prediction', '2nd Best Prediction', '3rd Best Prediction']
     for i in range(0, 3):
         plot_error_distance_in_predictions(distance_error_count[i], chart_titles[i])
-
-    plot_confusion_matrix(confusion_matrix, normalize=True)
+    plot_confusion_matrix(confusion_matrix, normalize=False)
     np.save(OUTPUT_FOLDER + 'confusion matrix', confusion_matrix)
 
 
@@ -304,7 +277,7 @@ def save_results(results, print_to_console=False):
     if print_to_console:
         print(final_result)
 
-    with open(OUTPUT_FOLDER + "Phoneme Predictions.csv", "w") as text_file:
+    with open(OUTPUT_FOLDER + f'Phoneme Predictions.csv', "w") as text_file:
         text_file.write(final_result)
 
 
